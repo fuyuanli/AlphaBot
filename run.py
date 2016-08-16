@@ -15,7 +15,9 @@ logger = logging.getLogger('init')
 logger.setLevel(logging.INFO)
 
 def main():
+	logger.info('Alpha Bot v1.0')
 	config = init_config()
+	setup_logging()
 	bot = Bot(config)
 	bot.start()
 
@@ -36,6 +38,16 @@ def init_config():
 		return None
 
 	return config
+
+def setup_logging():
+	logging.getLogger("requests").setLevel(logging.ERROR)
+	logging.getLogger("websocket").setLevel(logging.ERROR)
+	logging.getLogger("socketio").setLevel(logging.ERROR)
+	logging.getLogger("engineio").setLevel(logging.ERROR)
+	logging.getLogger("socketIO-client").setLevel(logging.ERROR)
+	logging.getLogger("pgoapi").setLevel(logging.ERROR)
+	logging.getLogger("rpc_api").setLevel(logging.ERROR)
+
 
 if __name__ == '__main__':
 	main()
