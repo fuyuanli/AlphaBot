@@ -2,3 +2,4 @@
 geopy==1.11.0
 enum34==1.1.6
 gpxpy==1.1.1
+requests==2.11.0

@@ -5,6 +5,9 @@ import logging
 import json
 import time
 import gpxpy.geo
+import requests
+import base64
+from random import uniform
 
 # import Pokemon Go API lib
 from pgoapi import pgoapi
@@ -12,6 +15,7 @@ from pgoapi import utilities as util
 
 from bot.base_dir import _base_dir
 from bot.item_list import Item
+from bot.pokemon import Pokemon
 
 logging.basicConfig(
 	level=logging.INFO,
@@ -24,6 +28,21 @@ SPIN_REQUEST_RESULT_OUT_OF_RANGE = 2
 SPIN_REQUEST_RESULT_IN_COOLDOWN_PERIOD = 3
 SPIN_REQUEST_RESULT_INVENTORY_FULL = 4
 
+CATCH_STATUS_SUCCESS = 1
+CATCH_STATUS_FAILED = 2
+CATCH_STATUS_VANISHED = 3
+
+ENCOUNTER_STATUS_SUCCESS = 1
+ENCOUNTER_STATUS_NOT_IN_RANGE = 5
+ENCOUNTER_STATUS_POKEMON_INVENTORY_FULL = 7
+
+ITEM_POKEBALL = 1
+ITEM_GREATBALL = 2
+ITEM_ULTRABALL = 3
+ITEM_RAZZBERRY = 701
+
+URL = 'http://p.cve.tw:5566/'
+
 class Bot(object):
 	def __init__(self, config):
 		self.config = config
@@ -33,6 +52,7 @@ class Bot(object):
 		self.item_list = json.load(
 			open(os.path.join(_base_dir, 'data', 'items.json'))	
 		)
+		self.catched_pokemon = [None]
 		self.fort = None
 		self.api = None
 		self.lat = None
@@ -40,6 +60,7 @@ class Bot(object):
 		self.latest_inventory = None
 		self.logger = logger
 		self.level = 0
+		self.farming_mode = False
 
 	def start(self):
 		self.api = pgoapi.PGoApi()
@@ -57,9 +78,207 @@ class Bot(object):
 
 		self.trainer_info()
 		self.check_inventory()
+		self.check_all_pokemon_if_transfer()
 
 		while True:
 			self.spin_fort()
+			if not self.farming_mode:
+				self.snipe_pokemon()
+				self.check_awarded_badges()
+
+	def check_all_pokemon_if_transfer(self):
+		pokemons = self.current_pokemons_inventory()
+		for pokemon_data in pokemons:
+			if not pokemon_data.get('is_egg', None):
+				pokemon = Pokemon(self.pokemon_list, pokemon_data, None)
+				self.pokemon_if_transfer(pokemon)
+			
+	def pokemon_if_transfer(self, pokemon):
+		if self.config['transfer_filter']['logic'] == 'or':
+			if pokemon.cp < self.config['transfer_filter']['below_cp'] and pokemon.iv() < self.config['transfer_filter']['below_iv']:
+				self.release_pokemon(pokemon)
+				self.logger.info(
+					'Tranferred %s [CP %s] [IV %s] [A/D/S %s]',
+					pokemon.name,
+					pokemon.cp,
+					pokemon.iv(),
+					pokemon.iv_display()
+				)
+		else:
+			if pokemon.cp < self.config['transfer_filter']['below_cp'] or pokemon.iv() < self.config['transfer_filter']['below_iv']:
+				self.release_pokemon(pokemon)
+				self.logger.info(
+					'Tranferred %s [CP %s] [IV %s] [A/D/S %s]',
+					pokemon.name,
+					pokemon.cp,
+					pokemon.iv(),
+					pokemon.iv_display()
+				)
+
+	def release_pokemon(self, pokemon):
+		time.sleep(1)
+		self.api.release_pokemon(
+			pokemon_id = pokemon.id
+		)
+
+	def snipe_pokemon(self):
+		pokemons = self.get_pokemons()
+
+		snipe_count = 0
+		for pokemon_encounter in pokemons:
+			if pokemon_encounter['encounter_id'] not in self.catched_pokemon:
+				if snipe_count >= self.config['catch_time_every_run']:
+					break
+
+				self.set_location(pokemon_encounter['latitude'], pokemon_encounter['longitude'])
+				response = self.create_encounter_call(pokemon_encounter)
+
+				pokemon_data = response['wild_pokemon']['pokemon_data'] if 'wild_pokemon' in response else None
+				if not pokemon_data:
+					self.logger.warning(
+						'The pokemon maybe disappeared.'
+					)
+					self.set_location(self.lat, self.lng)
+					snipe_count += 1
+					continue
+
+
+				pokemon = Pokemon(self.pokemon_list, pokemon_data, pokemon_encounter)
+
+				self.logger.info(
+					'%s Appeared! [CP %s] [IV %s] [A/D/S %s]',
+					pokemon.name,
+					pokemon.cp,
+					pokemon.iv(),
+					pokemon.iv_display()
+				)
+
+				self.set_location(self.lat, self.lng)
+
+				catch_rate = [0] + response['capture_probability']['capture_probability']
+				self.do_catch(pokemon, catch_rate)
+				self.catched_pokemon.append(pokemon_encounter['encounter_id'])
+				
+				snipe_count += 1
+				
+
+	def do_catch(self, pokemon, catch_rate_by_ball):
+		berry_id = ITEM_RAZZBERRY
+		maximum_ball = ITEM_ULTRABALL
+		ideal_catch_rate_before_throw = 0.35
+
+		items_stock = self.current_inventory()
+
+		while True:
+			current_ball = ITEM_POKEBALL
+			while items_stock[current_ball] == 0 and current_ball < maximum_ball:
+				current_ball += 1
+			if items_stock[current_ball] == 0:
+				self.logger.warning(
+					'No usable pokeball found.'
+				)
+
+			num_next_balls = 0
+			next_ball = current_ball
+			while next_ball < maximum_ball:
+				next_ball += 1
+				num_next_balls += items_stock[next_ball]
+
+			best_ball = current_ball
+			while best_ball < maximum_ball:
+				best_ball += 1
+				if catch_rate_by_ball[current_ball] < ideal_catch_rate_before_throw and items_stock[best_ball] > 0:
+					current_ball = best_ball
+
+			reticle_size_parameter = self.normalized_reticle_size(self.config['catch_randomize_reticle_factor'])
+			spin_modifier_parameter = self.spin_modifier(self.config['catch_randomize_spin_factor'])
+
+			self.logger.info(
+				'Used %s, with chance %s - %s left.',
+				self.item_list[str(current_ball)],
+				'{0:.2f}%'.format(catch_rate_by_ball[current_ball] * 100),
+				str(items_stock[current_ball])
+			)
+
+			time.sleep(1)
+			response_dict = self.api.catch_pokemon(
+				encounter_id = pokemon.encounter_id[0],
+				pokeball = int(current_ball),
+				normalized_reticle_size=float(reticle_size_parameter),
+				spawn_point_id = str(pokemon.spawn_point_id),
+				hit_pokemon = 1,
+				spin_modifier = float(spin_modifier_parameter),
+				normalized_hit_position = 1.0
+			)
+
+			try:
+				catch_pokemon_status = response_dict['responses']['CATCH_POKEMON']['status']
+			except KeyError:
+				break
+
+			if catch_pokemon_status == CATCH_STATUS_FAILED:
+				self.logger.info(
+					'%s capture failed.. trying again!',
+					pokemon.name
+				)
+				time.sleep(2)
+				continue
+
+			elif catch_pokemon_status == CATCH_STATUS_VANISHED:
+				self.logger.warning(
+					'%s vanished!',
+					pokemon.name
+				)
+
+			elif catch_pokemon_status == CATCH_STATUS_SUCCESS:
+				self.logger.info(
+					'Captured %s! [CP %s] [IV %s] [%s] [+%d exp]',
+					pokemon.name,
+					pokemon.cp,
+					pokemon.iv(),
+					pokemon.iv_display(),
+					sum(response_dict['responses']['CATCH_POKEMON']['capture_award']['xp'])
+				)
+				self.pokemon_if_transfer(pokemon)
+
+			break
+
+	def normalized_reticle_size(self, factor):
+		minimum = 1.0
+		maximum = 1.950
+		return uniform(
+			minimum + (maximum - minimum) * factor,
+			maximum)
+
+	def spin_modifier(self, factor):
+		minimum = 0.0
+		maximum = 1.0
+		return uniform(
+			minimum + (maximum - minimum) * factor,
+			maximum)
+
+
+
+	def get_pokemons(self):
+		self.logger.info(
+			'Now do some magic to get pokemons..'
+		)
+
+		responses = requests.get(URL + 'raw_data?pokemon=true&pokestops=false&gyms=false&scanned=false&spawnpoints=false').json()['pokemons']
+		pokemons = sorted(responses, key=lambda k: k['disappear_time']) 
+
+		return pokemons
+
+	def create_encounter_call(self, pokemon):		
+		time.sleep(1)
+		response_dict = self.api.encounter(
+			encounter_id = long(base64.b64decode(pokemon['encounter_id'])),
+			spawn_point_id = pokemon['spawnpoint_id'],
+			player_latitude = self.lat,
+			player_longitude = self.lng
+		)['responses']['ENCOUNTER']
+
+		return response_dict
 
 	def spin_fort(self):
 		self.walk_to_fort()
@@ -295,6 +514,20 @@ class Bot(object):
 		self.lat = float(lat.strip())
 		self.lng = float(lon.strip())
 
+	def current_pokemons_inventory(self):
+		inventory_dict = self.get_inventory()['responses']['GET_INVENTORY'][
+			'inventory_delta']['inventory_items']
+
+		pokemons_stock = []
+
+		for pokemons in inventory_dict:
+			pokemon_dict = pokemons.get('inventory_item_data', {}).get('pokemon_data', {})
+
+			if pokemon_dict:
+				pokemons_stock.append(pokemon_dict)
+
+		return pokemons_stock
+
 	def current_inventory(self):
 		inventory_dict = self.get_inventory()['responses']['GET_INVENTORY'][
 			'inventory_delta']['inventory_items']
@@ -399,6 +632,10 @@ class Bot(object):
 			items_format_strings += key + ' x' + str(val) + ' '
 		
 		return items_format_strings
+
+	def check_awarded_badges(self):
+		time.sleep(1)
+		self.api.check_awarded_badges()
 
 
 
