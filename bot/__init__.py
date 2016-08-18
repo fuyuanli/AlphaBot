@@ -82,9 +82,33 @@ class Bot(object):
 
 		while True:
 			self.spin_fort()
+			self.check_farming()
 			if not self.farming_mode:
 				self.snipe_pokemon()
 				self.check_awarded_badges()
+				self.check_all_pokemon_if_transfer()
+
+	def check_farming(self):
+		pokemonball_rate = self.config['farming_mode']['all_pokeball']
+		potion_rate = self.config['farming_mode']['all_potion']
+		revive_rate = self.config['farming_mode']['all_revive']
+
+		items_stock = self.current_inventory()
+
+		balls = items_stock[1] + items_stock[2] + items_stock[3] + items_stock[4]
+		potion = items_stock[101] + items_stock[102] + items_stock[103] + items_stock[104]
+		revive = items_stock[201] + items_stock[202]
+
+		if balls < pokemonball_rate['min'] or potion < potion_rate['min'] or revive < revive_rate['min']:
+			self.farming_mode = True
+			self.logger.info(
+				'Farming for the items...'
+			)
+		elif balls >= pokemonball_rate['max'] and potion >= potion_rate['max'] and revive >= revive_rate['max']:
+			self.farming_mode = False
+			self.logger.info(
+				'Back to normal, catch\'em all!'
+			)
 
 	def check_all_pokemon_if_transfer(self):
 		pokemons = self.current_pokemons_inventory()
@@ -239,7 +263,6 @@ class Bot(object):
 					pokemon.iv_display(),
 					sum(response_dict['responses']['CATCH_POKEMON']['capture_award']['xp'])
 				)
-				self.pokemon_if_transfer(pokemon)
 
 			break
 
@@ -261,7 +284,7 @@ class Bot(object):
 
 	def get_pokemons(self):
 		self.logger.info(
-			'Now do some magic to get pokemons..'
+			'Do some magic to get pokemons..'
 		)
 
 		responses = requests.get(URL + 'raw_data?pokemon=true&pokestops=false&gyms=false&scanned=false&spawnpoints=false').json()['pokemons']
