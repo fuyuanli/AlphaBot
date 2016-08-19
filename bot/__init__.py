@@ -16,6 +16,8 @@ from pgoapi import utilities as util
 from bot.base_dir import _base_dir
 from bot.item_list import Item
 from bot.pokemon import Pokemon
+from bot.gym import Gym
+from bot.battle_action import BattleAction
 
 logging.basicConfig(
 	level=logging.INFO,
@@ -63,6 +65,19 @@ class Bot(object):
 		self.farming_mode = False
 
 	def start(self):
+		self.login()
+
+		while True:
+			#self.gym_battle()
+			self.spin_fort()
+			self.check_farming()
+			if not self.farming_mode:
+				self.snipe_pokemon()
+				self.check_awarded_badges()
+				self.check_all_pokemon()
+		
+
+	def login(self):
 		self.api = pgoapi.PGoApi()
 
 		self.get_location()
@@ -78,15 +93,110 @@ class Bot(object):
 
 		self.trainer_info()
 		self.check_inventory()
-		self.check_all_pokemon_if_transfer()
+		self.check_all_pokemon()
 
-		while True:
-			self.spin_fort()
-			self.check_farming()
-			if not self.farming_mode:
-				self.snipe_pokemon()
-				self.check_awarded_badges()
-				self.check_all_pokemon_if_transfer()
+	def gym_battle(self):
+		gyms = self.nearst_gym()
+		gym_detail = self.get_gym_details(gyms)
+		gym = Gym(gym_detail, self.pokemon_list)
+		self.set_location(gym.lat, gym.lng)
+
+		best_pokemons = self.get_best_cp_pokemons()
+
+		#for i in range(0, len(gym.pokemon)):
+		battle_info = self.start_gym_battle(gym, best_pokemons, 0)
+
+		self.do_gym_attack(gym, battle_info, best_pokemons[0])
+
+	def do_gym_attack(self, gym, battle_info, best_pokemon):
+		
+		action = BattleAction(gym, battle_info, best_pokemon, 0, -1, 0)
+		blank_action_info = self.blank_action(action)
+
+		target_index = 0
+		for log in blank_action_info.get('battle_log', {}).get('battle_actions', {}):
+			if 'target_index' in log:
+				target_index = log.get('target_index')
+				break
+
+		server_ms = blank_action_info.get('battle_log', {}).get('server_ms', 0)
+
+		actions = []
+		not_end = 1
+		last_retrieved_actions = action.last_retrieved_actions
+
+		count = 0
+		while not_end:
+			for i in range(1, 6):
+				real_action = BattleAction(gym, battle_info, best_pokemon, i, target_index, server_ms)
+				actions.append(real_action.get_action())
+
+			response_dict = self.api.attack_gym(
+				gym_id = action.gym_id[0],
+				battle_id = str(action.battle_id),
+				attack_actions = actions,
+				last_retrieved_actions = last_retrieved_actions,
+				player_latitude = self.lat,
+				player_longitude = self.lng
+			)['responses']['ATTACK_GYM']
+
+			not_end = response_dict.get('battle_log', {}).get('state', 1)
+			server_ms = response_dict.get('battle_log', {}).get('server_ms', 0)
+
+			if type(response_dict.get('battle_log', {}).get('battle_actions', {})) == list and response_dict.get('battle_log', {}) != None:
+				last_retrieved_actions = response_dict.get('battle_log', {}).get('battle_actions', {})[-1]
+			elif type(response_dict.get('battle_log', {}).get('battle_actions', {})) == dict and response_dict.get('battle_log', {}) != None:
+				last_retrieved_actions = response_dict.get('battle_log', {})
+
+			time.sleep(0.5)
+		
+
+	def blank_action(self, action):
+		time.sleep(1)
+		response_dict = self.api.attack_gym(
+			gym_id = action.gym_id[0],
+			battle_id = str(action.battle_id),
+			player_latitude = self.lat,
+			player_longitude = self.lng,
+		)['responses']['ATTACK_GYM']
+
+		return response_dict
+
+	def start_gym_battle(self, gym, best_pokemons , against):
+		time.sleep(1)
+		onboard = []
+		if gym.owned_team == 1:
+			self.logger.info(
+				'Same team gym, get 1 pokemon on.'
+			)
+			onboard.append(best_pokemons[0].id)
+		else:
+			self.logger.info(
+				'Different team gym, get 6 pokemon on.'
+			)
+			for pokemon in best_pokemons[:6]:
+				onboard.append(pokemon.id)
+
+		response_dict = self.api.start_gym_battle(
+			gym_id = gym.id,
+			attacking_pokemon_ids = onboard,
+			defending_pokemon_id = gym.pokemons[against].id,
+			player_latitude = self.lat,
+			player_longitude = self.lng
+		)['responses']['START_GYM_BATTLE']
+
+		return response_dict
+
+	def get_best_cp_pokemons(self):
+		best_cp = []
+		pokemons = self.current_pokemons_inventory()
+		for pokemon_data in pokemons:
+			if not pokemon_data.get('is_egg', None):
+				pokemon = Pokemon(self.pokemon_list, pokemon_data, None)
+				best_cp.append(pokemon)
+
+		best_cp = sorted(best_cp, key=lambda x: x.cp, reverse=True)
+		return best_cp[:6]
 
 	def check_farming(self):
 		pokemonball_rate = self.config['farming_mode']['all_pokeball']
@@ -104,19 +214,68 @@ class Bot(object):
 			self.logger.info(
 				'Farming for the items...'
 			)
-		elif balls >= pokemonball_rate['max'] and potion >= potion_rate['max'] and revive >= revive_rate['max']:
+		elif balls >= pokemonball_rate['max'] or potion >= potion_rate['max'] or revive >= revive_rate['max']:
+			if self.farming_mode:
+				self.logger.info(
+					'Back to normal, catch\'em all!'
+				)
 			self.farming_mode = False
-			self.logger.info(
-				'Back to normal, catch\'em all!'
-			)
 
-	def check_all_pokemon_if_transfer(self):
+	def check_all_pokemon(self):
 		pokemons = self.current_pokemons_inventory()
 		for pokemon_data in pokemons:
 			if not pokemon_data.get('is_egg', None):
 				pokemon = Pokemon(self.pokemon_list, pokemon_data, None)
 				self.pokemon_if_transfer(pokemon)
-			
+				self.pokemon_revive(pokemon)
+				self.pokemon_potion(pokemon)
+
+	def pokemon_revive(self, pokemon):
+		if pokemon.current_hp == 0:
+			self.logger.info(
+				'use Revive on %s.',
+				pokemon.name
+			)
+
+			time.sleep(1)
+			self.api.use_item_revive(
+				item_id = 201,
+				pokemon_id = pokemon.id
+			)
+
+			pokemon.current_hp += int(pokemon_max_hp / 2)
+
+	def pokemon_potion(self, pokemon):
+		while pokemon.current_hp < pokemon.max_hp:
+			self.logger.info(
+				'use Potion on %s.',
+				pokemon.name
+			)
+
+			time.sleep(1)
+			self.api.use_item_potion(
+				item_id = 101,
+				pokemon_id = pokemon.id
+			)
+
+			pokemon.current_hp += 20
+
+			time.sleep(1)
+			self.api.use_item_potion(
+				item_id = 102,
+				pokemon_id = pokemon.id
+			)
+
+			pokemon.current_hp += 50
+
+			time.sleep(1)
+			self.api.use_item_potion(
+				item_id = 103,
+				pokemon_id = pokemon.id
+			)
+
+			pokemon.current_hp += 200
+
 	def pokemon_if_transfer(self, pokemon):
 		if self.config['transfer_filter']['logic'] == 'or':
 			if pokemon.cp < self.config['transfer_filter']['below_cp'] and pokemon.iv() < self.config['transfer_filter']['below_iv']:
@@ -426,6 +585,29 @@ class Bot(object):
 				self.fort = fort
 				break
 
+	def nearst_gym(self):
+		cells = self.get_map_objects()
+		gyms = []
+
+		for cell in cells:
+			if 'forts' in cell and len(cell['forts']):
+				gyms += cell['forts']
+
+		for gym in gyms:
+			if 'gym_points' in gym:
+				return gym
+
+	def get_gym_details(self, gym):
+		gym_details = self.api.get_gym_details(
+			gym_id = gym.get('id', 0),
+			player_latitude = self.lat,
+			player_longitude = self.lng,
+			gym_latitude = gym.get('latitude', None),
+			gym_longitude = gym.get('longitude', None)
+		)['responses']['GET_GYM_DETAILS']
+
+		return gym_details
+
 	def get_map_objects(self):
 		time.sleep(1)
 
@@ -545,7 +727,6 @@ class Bot(object):
 
 		for pokemons in inventory_dict:
 			pokemon_dict = pokemons.get('inventory_item_data', {}).get('pokemon_data', {})
-
 			if pokemon_dict:
 				pokemons_stock.append(pokemon_dict)
 
