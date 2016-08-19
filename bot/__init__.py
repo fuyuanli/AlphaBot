@@ -68,13 +68,20 @@ class Bot(object):
 		self.login()
 
 		while True:
-			#self.gym_battle()
-			self.spin_fort()
-			self.check_farming()
-			if not self.farming_mode:
-				self.snipe_pokemon()
-				self.check_awarded_badges()
-				self.check_all_pokemon()
+			try:
+				#self.gym_battle()
+				self.spin_fort()
+				self.check_farming()
+				if not self.farming_mode:
+					self.snipe_pokemon()
+					self.check_awarded_badges()
+					self.check_all_pokemon()
+			except:
+				try:
+					self.login()
+				except:
+					continue
+				continue
 		
 
 	def login(self):
@@ -209,17 +216,19 @@ class Bot(object):
 		potion = items_stock[101] + items_stock[102] + items_stock[103] + items_stock[104]
 		revive = items_stock[201] + items_stock[202]
 
-		if balls < pokemonball_rate['min'] or potion < potion_rate['min'] or revive < revive_rate['min']:
-			self.farming_mode = True
-			self.logger.info(
-				'Farming for the items...'
-			)
-		elif balls >= pokemonball_rate['max'] or potion >= potion_rate['max'] or revive >= revive_rate['max']:
-			if self.farming_mode:
+		if balls < pokemonball_rate['min']:
+			if level >= 5 and (potion < potion_rate['min'] or revive < revive_rate['min']):
+				self.farming_mode = True
 				self.logger.info(
-					'Back to normal, catch\'em all!'
+					'Farming for the items...'
 				)
-			self.farming_mode = False
+		elif balls >= pokemonball_rate['max']:
+		 	if level >= 5 and (potion >= potion_rate['max'] or revive >= revive_rate['max']):
+				if self.farming_mode:
+					self.logger.info(
+						'Back to normal, catch\'em all!'
+					)
+				self.farming_mode = False
 
 	def check_all_pokemon(self):
 		pokemons = self.current_pokemons_inventory()
@@ -299,7 +308,7 @@ class Bot(object):
 				)
 
 	def release_pokemon(self, pokemon):
-		time.sleep(1)
+		time.sleep(0.1)
 		self.api.release_pokemon(
 			pokemon_id = pokemon.id
 		)
@@ -383,7 +392,7 @@ class Bot(object):
 				str(items_stock[current_ball])
 			)
 
-			time.sleep(1)
+			time.sleep(0.1)
 			response_dict = self.api.catch_pokemon(
 				encounter_id = pokemon.encounter_id[0],
 				pokeball = int(current_ball),
@@ -404,7 +413,7 @@ class Bot(object):
 					'%s capture failed.. trying again!',
 					pokemon.name
 				)
-				time.sleep(2)
+				time.sleep(0.1)
 				continue
 
 			elif catch_pokemon_status == CATCH_STATUS_VANISHED:
@@ -452,7 +461,7 @@ class Bot(object):
 		return pokemons
 
 	def create_encounter_call(self, pokemon):		
-		time.sleep(1)
+		time.sleep(0.1)
 		response_dict = self.api.encounter(
 			encounter_id = long(base64.b64decode(pokemon['encounter_id'])),
 			spawn_point_id = pokemon['spawnpoint_id'],
@@ -664,8 +673,8 @@ class Bot(object):
 
 		self.logger.info(
 			'Trainer Name: ' + str(player['username']) +
-			' | Lv: ' + str(info['level']) + 
-			' (' + str(info['experience']) + '/' + str(info['next_level_xp']) + ')'
+			' | Lv: ' + str(info.get('level', 0)) + 
+			' (' + str(info.get('experience', 0)) + '/' + str(info.get('next_level_xp', 0)) + ')'
 		)
 
 		self.logger.info(
@@ -711,7 +720,7 @@ class Bot(object):
 		return player_data
 
 	def set_location(self, lat, lng):
-		time.sleep(1)
+		time.sleep(0.1)
 		self.api.set_position(lat, lng, 0.0)
 
 	def get_location(self):
