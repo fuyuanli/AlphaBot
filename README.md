@@ -20,6 +20,7 @@ There is still lots of bug, it will be fix very soon.
 virtual env .
 source bin/activate
 pip install -r requirement.txt
+cp configs/config.json.example configs/config.json
 python run.py
 ```
 
