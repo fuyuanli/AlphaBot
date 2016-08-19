@@ -17,9 +17,10 @@ There is still lots of bug, it will be fix very soon.
 
 ## Installation
 ```
-virtual env .
+virtualenv .
 source bin/activate
-pip install -r requirement.txt
+pip install -r requirements.txt
+cp configs/config.json.example configs/config.json
 python run.py
 ```
 
