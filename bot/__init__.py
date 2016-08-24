@@ -16,8 +16,6 @@ from pgoapi import utilities as util
 from bot.base_dir import _base_dir
 from bot.item_list import Item
 from bot.pokemon import Pokemon
-from bot.gym import Gym
-from bot.battle_action import BattleAction
 
 logging.basicConfig(
 	level=logging.INFO,
@@ -43,7 +41,7 @@ ITEM_GREATBALL = 2
 ITEM_ULTRABALL = 3
 ITEM_RAZZBERRY = 701
 
-URL = 'http://p.cve.tw:5566/'
+URL = 'https://p.cve.tw:5566/'
 
 class Bot(object):
 	def __init__(self, config):
@@ -68,20 +66,12 @@ class Bot(object):
 		self.login()
 
 		while True:
-			try:
-				#self.gym_battle()
-				self.spin_fort()
-				self.check_farming()
-				if not self.farming_mode:
-					self.snipe_pokemon()
-					self.check_awarded_badges()
-					self.check_all_pokemon()
-			except:
-				try:
-					self.login()
-				except:
-					continue
-				continue
+			self.spin_fort()
+			self.check_farming()
+			if not self.farming_mode:
+				self.snipe_pokemon()
+				self.check_awarded_badges()
+				self.check_all_pokemon()
 		
 
 	def login(self):
@@ -94,116 +84,13 @@ class Bot(object):
 		self.api.set_authentication(
 			provider = self.config['auth_service'], 
 			username = self.config['username'],
-			password = self.config['password']
+			password = self.config['password'],
 		)
 		self.api.activate_signature(self.config['encrypt_location'])
 
 		self.trainer_info()
 		self.check_inventory()
 		self.check_all_pokemon()
-
-	def gym_battle(self):
-		gyms = self.nearst_gym()
-		gym_detail = self.get_gym_details(gyms)
-		gym = Gym(gym_detail, self.pokemon_list)
-		self.set_location(gym.lat, gym.lng)
-
-		best_pokemons = self.get_best_cp_pokemons()
-
-		#for i in range(0, len(gym.pokemon)):
-		battle_info = self.start_gym_battle(gym, best_pokemons, 0)
-
-		self.do_gym_attack(gym, battle_info, best_pokemons[0])
-
-	def do_gym_attack(self, gym, battle_info, best_pokemon):
-		
-		action = BattleAction(gym, battle_info, best_pokemon, 0, -1, 0)
-		blank_action_info = self.blank_action(action)
-
-		target_index = 0
-		for log in blank_action_info.get('battle_log', {}).get('battle_actions', {}):
-			if 'target_index' in log:
-				target_index = log.get('target_index')
-				break
-
-		server_ms = blank_action_info.get('battle_log', {}).get('server_ms', 0)
-
-		actions = []
-		not_end = 1
-		last_retrieved_actions = action.last_retrieved_actions
-
-		count = 0
-		while not_end:
-			for i in range(1, 6):
-				real_action = BattleAction(gym, battle_info, best_pokemon, i, target_index, server_ms)
-				actions.append(real_action.get_action())
-
-			response_dict = self.api.attack_gym(
-				gym_id = action.gym_id[0],
-				battle_id = str(action.battle_id),
-				attack_actions = actions,
-				last_retrieved_actions = last_retrieved_actions,
-				player_latitude = self.lat,
-				player_longitude = self.lng
-			)['responses']['ATTACK_GYM']
-
-			not_end = response_dict.get('battle_log', {}).get('state', 1)
-			server_ms = response_dict.get('battle_log', {}).get('server_ms', 0)
-
-			if type(response_dict.get('battle_log', {}).get('battle_actions', {})) == list and response_dict.get('battle_log', {}) != None:
-				last_retrieved_actions = response_dict.get('battle_log', {}).get('battle_actions', {})[-1]
-			elif type(response_dict.get('battle_log', {}).get('battle_actions', {})) == dict and response_dict.get('battle_log', {}) != None:
-				last_retrieved_actions = response_dict.get('battle_log', {})
-
-			time.sleep(0.5)
-		
-
-	def blank_action(self, action):
-		time.sleep(1)
-		response_dict = self.api.attack_gym(
-			gym_id = action.gym_id[0],
-			battle_id = str(action.battle_id),
-			player_latitude = self.lat,
-			player_longitude = self.lng,
-		)['responses']['ATTACK_GYM']
-
-		return response_dict
-
-	def start_gym_battle(self, gym, best_pokemons , against):
-		time.sleep(1)
-		onboard = []
-		if gym.owned_team == 1:
-			self.logger.info(
-				'Same team gym, get 1 pokemon on.'
-			)
-			onboard.append(best_pokemons[0].id)
-		else:
-			self.logger.info(
-				'Different team gym, get 6 pokemon on.'
-			)
-			for pokemon in best_pokemons[:6]:
-				onboard.append(pokemon.id)
-
-		response_dict = self.api.start_gym_battle(
-			gym_id = gym.id,
-			attacking_pokemon_ids = onboard,
-			defending_pokemon_id = gym.pokemons[against].id,
-			player_latitude = self.lat,
-			player_longitude = self.lng
-		)['responses']['START_GYM_BATTLE']
-
-		return response_dict
-
-	def get_best_cp_pokemons(self):
-		best_cp = []
-		pokemons = self.current_pokemons_inventory()
-		for pokemon_data in pokemons:
-			if not pokemon_data.get('is_egg', None):
-				pokemon = Pokemon(self.pokemon_list, pokemon_data, None)
-				best_cp.append(pokemon)
-
-		best_cp = sorted(best_cp, key=lambda x: x.cp, reverse=True)
-		return best_cp[:6]
 
 	def check_farming(self):
 		pokemonball_rate = self.config['farming_mode']['all_pokeball']
@@ -217,13 +104,13 @@ class Bot(object):
 		revive = items_stock[201] + items_stock[202]
 
 		if balls < pokemonball_rate['min']:
-			if level >= 5 and (potion < potion_rate['min'] or revive < revive_rate['min']):
+			if self.level >= 5 and (potion < potion_rate['min'] or revive < revive_rate['min']):
 				self.farming_mode = True
 				self.logger.info(
 					'Farming for the items...'
 				)
 		elif balls >= pokemonball_rate['max']:
-		 	if level >= 5 and (potion >= potion_rate['max'] or revive >= revive_rate['max']):
+		 	if self.level >= 5 and (potion >= potion_rate['max'] or revive >= revive_rate['max']):
 				if self.farming_mode:
 					self.logger.info(
 						'Back to normal, catch\'em all!'
@@ -232,63 +119,20 @@ class Bot(object):
 
 	def check_all_pokemon(self):
 		pokemons = self.current_pokemons_inventory()
+		pokemons_need_transfer = []
 		for pokemon_data in pokemons:
 			if not pokemon_data.get('is_egg', None):
 				pokemon = Pokemon(self.pokemon_list, pokemon_data, None)
-				self.pokemon_if_transfer(pokemon)
-				self.pokemon_revive(pokemon)
-				self.pokemon_potion(pokemon)
+				transfer = self.pokemon_if_transfer(pokemon)
 
-	def pokemon_revive(self, pokemon):
-		if pokemon.current_hp == 0:
-			self.logger.info(
-				'use Revive on %s.',
-				pokemon.name
-			)
+				if transfer:
+					pokemons_need_transfer.append(pokemon)
 
-			time.sleep(1)
-			self.api.use_item_revive(
-				item_id = 201,
-				pokemon_id = pokemon.id
-			)
-
-			pokemon.current_hp += int(pokemon_max_hp / 2)
-
-	def pokemon_potion(self, pokemon):
-		while pokemon.current_hp < pokemon.max_hp:
-			self.logger.info(
-				'use Potion on %s.',
-				pokemon.name
-			)
-
-			time.sleep(1)
-			self.api.use_item_potion(
-				item_id = 101,
-				pokemon_id = pokemon.id
-			)
-
-			pokemon.current_hp += 20
-
-			time.sleep(1)
-			self.api.use_item_potion(
-				item_id = 102,
-				pokemon_id = pokemon.id
-			)
-
-			pokemon.current_hp += 50
-
-			time.sleep(1)
-			self.api.use_item_potion(
-				item_id = 103,
-				pokemon_id = pokemon.id
-			)
-
-			pokemon.current_hp += 200
+		self.release_pokemon(pokemons_need_transfer)
 
 	def pokemon_if_transfer(self, pokemon):
 		if self.config['transfer_filter']['logic'] == 'or':
 			if pokemon.cp < self.config['transfer_filter']['below_cp'] and pokemon.iv() < self.config['transfer_filter']['below_iv']:
-				self.release_pokemon(pokemon)
 				self.logger.info(
 					'Tranferred %s [CP %s] [IV %s] [A/D/S %s]',
 					pokemon.name,
@@ -296,9 +140,9 @@ class Bot(object):
 					pokemon.iv(),
 					pokemon.iv_display()
 				)
+				return True
 		else:
 			if pokemon.cp < self.config['transfer_filter']['below_cp'] or pokemon.iv() < self.config['transfer_filter']['below_iv']:
-				self.release_pokemon(pokemon)
 				self.logger.info(
 					'Tranferred %s [CP %s] [IV %s] [A/D/S %s]',
 					pokemon.name,
@@ -306,12 +150,17 @@ class Bot(object):
 					pokemon.iv(),
 					pokemon.iv_display()
 				)
+				return True
+		return False
 
-	def release_pokemon(self, pokemon):
-		time.sleep(0.1)
-		self.api.release_pokemon(
-			pokemon_id = pokemon.id
-		)
+	def release_pokemon(self, pokemons):
+		if pokemons:
+			req = self.api.create_request()
+			for pokemon in pokemons:
+				req.release_pokemon(
+					pokemon_id = pokemon.id
+				)
+			req = req.call()
 
 	def snipe_pokemon(self):
 		pokemons = self.get_pokemons()
@@ -455,7 +304,7 @@ class Bot(object):
 			'Do some magic to get pokemons..'
 		)
 
-		responses = requests.get(URL + 'raw_data?pokemon=true&pokestops=false&gyms=false&scanned=false&spawnpoints=false').json()['pokemons']
+		responses = requests.get(URL + 'raw_data?pokemon=true&pokestops=false&gyms=false&scanned=false&spawnpoints=false', verify=False).json()['pokemons']
 		pokemons = sorted(responses, key=lambda k: k['disappear_time']) 
 
 		return pokemons
@@ -593,29 +442,6 @@ class Bot(object):
 			if 'cooldown_complete_timestamp_ms' not in fort:
 				self.fort = fort
 				break
-
-	def nearst_gym(self):
-		cells = self.get_map_objects()
-		gyms = []
-
-		for cell in cells:
-			if 'forts' in cell and len(cell['forts']):
-				gyms += cell['forts']
-
-		for gym in gyms:
-			if 'gym_points' in gym:
-				return gym
-
-	def get_gym_details(self, gym):
-		gym_details = self.api.get_gym_details(
-			gym_id = gym.get('id', 0),
-			player_latitude = self.lat,
-			player_longitude = self.lng,
-			gym_latitude = gym.get('latitude', None),
-			gym_longitude = gym.get('longitude', None)
-		)['responses']['GET_GYM_DETAILS']
-
-		return gym_details
 
 	def get_map_objects(self):
 		time.sleep(1)
