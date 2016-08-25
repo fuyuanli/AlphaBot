@@ -36,7 +36,7 @@ ENCOUNTER_STATUS_SUCCESS = 1
 ENCOUNTER_STATUS_NOT_IN_RANGE = 5
 ENCOUNTER_STATUS_POKEMON_INVENTORY_FULL = 7
 
-URL = 'https://p.cve.tw:5566/'
+URL = 'http://p.cve.tw:5566/'
 
 class Bot(object):
 	def __init__(self, config):
@@ -53,7 +53,6 @@ class Bot(object):
 		self.lat = None
 		self.lng = None
 		self.logger = logger
-		self.level = 0
 		self.farming_mode = False
 		self.inventorys = None
 
@@ -74,7 +73,11 @@ class Bot(object):
 
 		self.get_location()
 
-		self.logger.info('Set location - ' + str(self.lat) + ', ' + str(self.lng))
+		self.logger.info(
+			'Set location - %f, %f',
+			self.lat,
+			self.lng
+		)
 		self.set_location(self.lat, self.lng)
 		self.api.set_authentication(
 			provider = self.config['auth_service'], 
@@ -99,13 +102,13 @@ class Bot(object):
 		revive = items_stock[201] + items_stock[202]
 
 		if balls < pokemonball_rate['min']:
-			if self.level >= 5 and (balls < pokemonball_rate['min'] or potion < potion_rate['min'] or revive < revive_rate['min']):
+			if self.inventorys.level >= 5 and (balls < pokemonball_rate['min'] or potion < potion_rate['min'] or revive < revive_rate['min']):
 				self.farming_mode = True
 				self.logger.info(
 					'Farming for the items...'
 				)
 		elif balls >= pokemonball_rate['max']:
-		 	if self.level >= 5 and (balls >= pokemonball_rate['max'] or potion >= potion_rate['max'] or revive >= revive_rate['max']):
+		 	if self.inventorys.level >= 5 and (balls >= pokemonball_rate['max'] or potion >= potion_rate['max'] or revive >= revive_rate['max']):
 				if self.farming_mode:
 					self.logger.info(
 						'Back to normal, catch\'em all!'
@@ -231,8 +234,9 @@ class Bot(object):
 					pokemon.iv_display(),
 					sum(response_dict['responses']['CATCH_POKEMON']['capture_award']['xp'])
 				)
+				self.inventorys.exp += sum(response_dict['responses']['CATCH_POKEMON']['capture_award']['xp'])
 
-			return response_dict['responses']['CATCH_POKEMON']['captured_pokemon_id']
+			return response_dict['responses']['CATCH_POKEMON'].get('captured_pokemon_id', 0)
 
 	def normalized_reticle_size(self, factor):
 		minimum = 1.0
@@ -297,6 +301,7 @@ class Bot(object):
 						items_awarded
 					)
 
+					self.inventorys.exp += experience_awarded
 					self.inventorys.check_items()
 					self.check_level()
 			elif spin_result == bot.fort.SPIN_REQUEST_RESULT_INVENTORY_FULL:
@@ -421,8 +426,6 @@ class Bot(object):
 		player = self.get_player_data()
 		self.inventorys = Inventory(self.api, self.config, self.logger)
 		
-		self.check_level()
-		
 		pokecoins = 0
 		stardust = 0
 
@@ -486,50 +489,67 @@ class Bot(object):
 		return player_data
 
 	def set_location(self, lat, lng):
-		time.sleep(0.1)
 		self.api.set_position(lat, lng, 0.0)
 
+		user_location = os.path.join(_base_dir, 'data', 'last-location-' + self.config['username'] + '.json')
+		location_json = {}
+		with open(user_location) as f:
+			location_json = json.load(f)
+		with open(user_location, 'w') as outfile:
+			json.dump({
+				'lat': self.lat,
+				'lng': self.lng,
+				'start_lat': location_json['start_lat'],
+				'start_lng': location_json['start_lng']
+			}, outfile)
+
 	def get_location(self):
-		lat, lon = self.config['location'].split(',')
-		self.lat = float(lat.strip())
-		self.lng = float(lon.strip())
+		user_location = os.path.join(_base_dir, 'data', 'last-location-' + self.config['username'] + '.json')
+		lat, lng = self.config['location'].split(',')
+		
+		if os.path.isfile(user_location):
+			location_json = {}
+			with open(user_location) as f:
+				location_json = json.load(f)
 
-	def get_inventory(self):
-		time.sleep(1)
-		return self.api.get_inventory()
+			if location_json['start_lat'] == float(lat.strip()) and location_json['start_lng'] == float(lng.strip()):
+				self.lat = location_json['lat']
+				self.lng = location_json['lng']
 
-	def get_stats(self):
-		stats = {}
-
-		time.sleep(1)
-		response_dict = self.api.get_inventory()['responses']['GET_INVENTORY'][
-			'inventory_delta']['inventory_items']
-
-		for items in response_dict:
-			stats = items.get('inventory_item_data', {}).get('player_stats', {})
-
-			if stats:
-				return stats
-
-		return stats
-
-	def check_level(self):
-		stats = self.get_stats()
-
-		if stats['level'] > self.level:
-			time.sleep(1)
-			self.api.level_up_rewards(
-				level = stats['level']
-			)
-
-			if self.level != 0:
 				self.logger.info(
-					'Level up from %d to %d.',
-					self.level,
-					stats['level']
+					'Get previous location - %f, %f',
+					self.lat,
+					self.lng
 				)
 
-			self.level = stats['level']
+				return 
+
+		self.lat = float(lat.strip())
+		self.lng = float(lng.strip())
+
+		with open(user_location, 'w') as outfile:
+			json.dump({
+				'lat': self.lat,
+				'lng': self.lng,
+				'start_lat': self.lat,
+				'start_lng': self.lng
+			}, outfile)
+
+
+	def check_level(self):
+		if self.inventorys.exp >= self.inventorys.next_exp:
+			time.sleep(1)
+			self.api.level_up_rewards(
+				level = self.inventorys.level + 1
+			)
+
+			self.logger.info(
+				'Level up from %d to %d.',
+				self.inventorys.level,
+				self.inventorys.level + 1,
+			)
+
+			self.inventorys.get_inventory()
 
 	def get_items_awarded_from_fort_spinned(self, response_dict):
 		items_awarded = response_dict['responses']['FORT_SEARCH'].get('items_awarded', {})

@@ -110,6 +110,10 @@ src/
 configs/*
 !configs/config.json.example
 
+# Personal data
+data/last-location-*.json
+data/daily-limit-*.json
+
 # Virtualenv folders
 bin/
 include/
