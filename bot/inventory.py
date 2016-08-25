@@ -40,13 +40,22 @@ ITEM_POKEMON_STORAGE_UPGRADE = 1001
 ITEM_ITEM_STORAGE_UPGRADE = 1002
 
 class Inventory(object):
-	def __init__(self, api):
-		self.items = None
-		self.pokemons = None
+	def __init__(self, api, config, logger):
 		self.api = api
+		self.config = config
+		self.logger = logger
+		self.item_list = json.load(
+			open(os.path.join(_base_dir, 'data', 'items.json'))
+		)
 		self.pokemon_list = json.load(
 			open(os.path.join(_base_dir, 'data', 'pokemon.json'))
 		)
+		
+		self.items = None
+		self.pokemons = None
+		self.exp = None
+		self.next_exp = None
+		self.level = None
 
 		self.get_inventory()
 
@@ -56,6 +65,20 @@ class Inventory(object):
 
 		self.inventory_items(inventorys)
 		self.inventory_pokemons(inventorys)
+		self.inventory_stats(inventorys)
+
+	def inventory_stats(self, inventorys):
+		stats = {}
+
+		for items in inventorys:
+			stats = items.get('inventory_item_data', {}).get('player_stats', {})
+
+			if stats:
+				break
+
+		self.exp = stats.get('experience', 0)
+		self.next_exp = stats.get('next_level_xp', 0)
+		self.level = stats.get('level', 0)
 
 	def inventory_items(self, inventorys):
 		items_stock = {x.value: 0 for x in list(Item)}
@@ -71,6 +94,38 @@ class Inventory(object):
 
 		self.items = items_stock
 
+	def check_items(self):
+		recycle_inventorys = []
+		for item in self.config['item_limit']:
+			item_id = int(self.item_list.keys()[self.item_list.values().index(item)])
+			item_limit = self.config['item_limit'][item]
+			item_count = self.items[item_id]
+
+			if item_count and item_id and item_limit and item_count > item_limit:
+				recycle_inventorys.append({
+					'item_id': item_id,
+					'count': item_count - item_limit
+				})
+
+				self.logger.info(	
+					'Recycled: %s x%d',	
+					self.item_list[str(item_id)],	
+					item_count - item_limit	
+				)
+
+		self.recycle_items(recycle_inventorys)
+
+	def recycle_items(self, items):
+		if items:
+			req = self.api.create_request()
+			for item in items:
+				self.items[item['item_id']] -= item['count']
+				req.recycle_inventory_item(
+					item_id = item['item_id'],
+					count = item['count']
+				)
+			req.call()
+
 	def inventory_pokemons(self, inventorys):
 		pokemons_stock = []
 
@@ -83,3 +138,48 @@ class Inventory(object):
 				pokemons_stock.append(pokemon)
 
 		self.pokemons = pokemons_stock
+
+	def check_pokemons(self):
+		pokemons = self.pokemons
+		transfer_pokemons = []
+		for pokemon in pokemons:
+			if not pokemon.is_egg:
+				transfer = self.pokemon_threshold(pokemon)
+
+				if transfer:
+					transfer_pokemons.append(pokemon)
+
+		self.transfer_pokemons(transfer_pokemons)
+
+	def transfer_pokemons(self, pokemons):
+		if pokemons:
+			req = self.api.create_request()
+			for pokemon in pokemons:
+				self.pokemons.remove(pokemon)
+				req.release_pokemon(
+					pokemon_id = pokemon.id
+				)
+			req.call()
+
+	def pokemon_threshold(self, pokemon):
+		if self.config['transfer_filter']['logic'] == 'or':
+			if pokemon.cp < self.config['transfer_filter']['below_cp'] and pokemon.iv() < self.config['transfer_filter']['below_iv']:
+				self.logger.info(
+					'Tranferred %s [CP %s] [IV %s] [A/D/S %s]',
+					pokemon.name,
+					pokemon.cp,
+					pokemon.iv(),
+					pokemon.iv_display()
+				)
+				return True
+		else:
+			if pokemon.cp < self.config['transfer_filter']['below_cp'] or pokemon.iv() < self.config['transfer_filter']['below_iv']:
+				self.logger.info(
+					'Tranferred %s [CP %s] [IV %s] [A/D/S %s]',
+					pokemon.name,
+					pokemon.cp,
+					pokemon.iv(),
+					pokemon.iv_display()
+				)
+				return True
+		return False

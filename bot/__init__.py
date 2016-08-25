@@ -66,7 +66,7 @@ class Bot(object):
 			if not self.farming_mode:
 				self.snipe_pokemon()
 				self.check_awarded_badges()
-				self.check_all_pokemon()
+				self.inventorys.check_pokemons()
 		
 
 	def login(self):
@@ -84,8 +84,8 @@ class Bot(object):
 		self.api.activate_signature(self.config['encrypt_location'])
 
 		self.trainer_info()
-		self.check_inventory()
-		self.check_all_pokemon()
+		self.inventorys.check_items()
+		self.inventorys.check_pokemons()
 
 	def check_farming(self):
 		pokemonball_rate = self.config['farming_mode']['all_pokeball']
@@ -111,51 +111,6 @@ class Bot(object):
 						'Back to normal, catch\'em all!'
 					)
 				self.farming_mode = False
-
-	def check_all_pokemon(self):
-		pokemons = self.inventorys.pokemons
-		pokemons_need_transfer = []
-		for pokemon in pokemons:
-			if not pokemon.is_egg:
-				transfer = self.pokemon_if_transfer(pokemon)
-
-				if transfer:
-					pokemons_need_transfer.append(pokemon)
-
-		self.release_pokemon(pokemons_need_transfer)
-
-	def pokemon_if_transfer(self, pokemon):
-		if self.config['transfer_filter']['logic'] == 'or':
-			if pokemon.cp < self.config['transfer_filter']['below_cp'] and pokemon.iv() < self.config['transfer_filter']['below_iv']:
-				self.logger.info(
-					'Tranferred %s [CP %s] [IV %s] [A/D/S %s]',
-					pokemon.name,
-					pokemon.cp,
-					pokemon.iv(),
-					pokemon.iv_display()
-				)
-				return True
-		else:
-			if pokemon.cp < self.config['transfer_filter']['below_cp'] or pokemon.iv() < self.config['transfer_filter']['below_iv']:
-				self.logger.info(
-					'Tranferred %s [CP %s] [IV %s] [A/D/S %s]',
-					pokemon.name,
-					pokemon.cp,
-					pokemon.iv(),
-					pokemon.iv_display()
-				)
-				return True
-		return False
-
-	def release_pokemon(self, pokemons):
-		if pokemons:
-			req = self.api.create_request()
-			for pokemon in pokemons:
-				self.inventorys.pokemons.remove(pokemon)
-				req.release_pokemon(
-					pokemon_id = pokemon.id
-				)
-			req.call()
 
 	def snipe_pokemon(self):
 		pokemons = self.get_pokemons()
@@ -342,7 +297,7 @@ class Bot(object):
 						items_awarded
 					)
 
-					self.check_inventory()
+					self.inventorys.check_items()
 					self.check_level()
 			elif spin_result == bot.fort.SPIN_REQUEST_RESULT_INVENTORY_FULL:
 				self.logger.warning(
@@ -464,10 +419,9 @@ class Bot(object):
 
 	def trainer_info(self):
 		player = self.get_player_data()
-		self.inventorys = Inventory(self.api)
+		self.inventorys = Inventory(self.api, self.config, self.logger)
 		
 		self.check_level()
-		info = self.get_stats()
 		
 		pokecoins = 0
 		stardust = 0
@@ -485,8 +439,8 @@ class Bot(object):
 
 		self.logger.info(
 			'Trainer Name: ' + str(player['username']) +
-			' | Lv: ' + str(info.get('level', 0)) + 
-			' (' + str(info.get('experience', 0)) + '/' + str(info.get('next_level_xp', 0)) + ')'
+			' | Lv: ' + str(self.inventorys.level) + 
+			' (' + str(self.inventorys.exp) + '/' + str(self.inventorys.next_exp) + ')'
 		)
 
 		self.logger.info(
@@ -543,38 +497,6 @@ class Bot(object):
 	def get_inventory(self):
 		time.sleep(1)
 		return self.api.get_inventory()
-
-	def check_inventory(self):
-		recycle_inventorys = []
-		for item in self.config['item_limit']:
-			item_id = int(self.item_list.keys()[self.item_list.values().index(item)])
-			item_limit = self.config['item_limit'][item]
-			item_count = self.inventorys.items[item_id]
-
-			if item_count and item_id and item_limit and item_count > item_limit:
-				recycle_inventorys.append({
-					'item_id': item_id,
-					'count': item_count - item_limit
-				})
-
-				self.logger.info(	
-					'Recycled: %s x%d',	
-					self.item_list[str(item_id)],	
-					item_count - item_limit	
-				)
-
-		self.recycle_inventory(recycle_inventorys)
-
-	def recycle_inventory(self, items):
-		if items:
-			req = self.api.create_request()
-			for item in items:
-				self.inventorys.items[item['item_id']] -= item['count']
-				req.recycle_inventory_item(
-					item_id = item['item_id'],
-					count = item['count']
-				)
-			req.call()
 
 	def get_stats(self):
 		stats = {}
@@ -635,4 +557,3 @@ class Bot(object):
 	def check_awarded_badges(self):
 		time.sleep(1)
 		self.api.check_awarded_badges()
-
