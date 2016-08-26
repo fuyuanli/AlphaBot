@@ -34,6 +34,7 @@
     },
 
     "catch_time_every_run": 5,
+    "rare_first": true,
 
     "transfer_filter": {
         "below_iv": 0.8,

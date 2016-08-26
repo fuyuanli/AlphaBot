@@ -108,7 +108,7 @@ class Bot(object):
 					'Farming for the items...'
 				)
 		elif balls >= pokemonball_rate['max']:
-		 	if self.inventorys.level >= 5 and (balls >= pokemonball_rate['max'] or potion >= potion_rate['max'] or revive >= revive_rate['max']):
+			if self.inventorys.level >= 5 and (balls >= pokemonball_rate['max'] or potion >= potion_rate['max'] or revive >= revive_rate['max']):
 				if self.farming_mode:
 					self.logger.info(
 						'Back to normal, catch\'em all!'
@@ -158,10 +158,12 @@ class Bot(object):
 				
 
 	def do_catch(self, pokemon, catch_rate_by_ball):
-		berry_id = bot.inventory.ITEM_BLUK_BERRY
+		berry_id = bot.inventory.ITEM_RAZZ_BERRY
 		maximum_ball = bot.inventory.ITEM_ULTRA_BALL
 		ideal_catch_rate_before_throw = 0.35
+		berry_count = self.inventorys.items[berry_id]
 
+		used_berry = False
 		while True:
 			current_ball = bot.inventory.ITEM_POKE_BALL
 			while self.inventorys.items[current_ball] == 0 and current_ball < maximum_ball:
@@ -177,11 +179,29 @@ class Bot(object):
 				next_ball += 1
 				num_next_balls += self.inventorys.items[next_ball]
 
+			berries_to_spare = berry_count > num_next_balls + 30
+
+			if catch_rate_by_ball[current_ball] < ideal_catch_rate_before_throw and berries_to_spare and not used_berry:
+				new_catch_rate_by_ball = self.use_berry(berry_id, berry_count, pokemon.encounter_id[0], str(pokemon.spawn_point_id), catch_rate_by_ball, current_ball)
+				if new_catch_rate_by_ball != catch_rate_by_ball:
+					catch_rate_by_ball = new_catch_rate_by_ball
+					self.inventorys.items[berry_id] -= 1
+					berry_count -= 1
+					used_berry = True
+
 			best_ball = current_ball
 			while best_ball < maximum_ball:
 				best_ball += 1
 				if catch_rate_by_ball[current_ball] < ideal_catch_rate_before_throw and self.inventorys.items[best_ball] > 0:
 					current_ball = best_ball
+
+			if catch_rate_by_ball[current_ball] < ideal_catch_rate_before_throw and berry_count > 0 and not used_berry:
+				new_catch_rate_by_ball = self.use_berry(berry_id, berry_count, pokemon.encounter_id[0], str(pokemon.spawn_point_id), catch_rate_by_ball, current_ball)
+				if new_catch_rate_by_ball != catch_rate_by_ball:
+					catch_rate_by_ball = new_catch_rate_by_ball
+					self.inventorys.items[berry_id] -= 1
+					berry_count -= 1
+					used_berry = True
 
 			reticle_size_parameter = self.normalized_reticle_size(self.config['catch_randomize_reticle_factor'])
 			spin_modifier_parameter = self.spin_modifier(self.config['catch_randomize_spin_factor'])
@@ -238,6 +258,39 @@ class Bot(object):
 
 			return response_dict['responses']['CATCH_POKEMON'].get('captured_pokemon_id', 0)
 
+	def use_berry(self, berry_id, berry_count, encounter_id, spawn_point_id, catch_rate_by_ball, current_ball):
+		new_catch_rate_by_ball = []
+
+		self.logger.info(
+			'Catch rate of %s with %s is low. Throwing %s (have %d)',
+			'{0:.2f}%'.format(catch_rate_by_ball[current_ball] * 100),
+			self.item_list[str(current_ball)],
+			self.item_list[str(berry_id)],
+			int(berry_count)
+		)
+
+		response_dict = self.api.use_item_capture(
+			item_id = berry_id,
+			encounter_id = encounter_id,
+			spawn_point_id = spawn_point_id
+		)
+
+		responses = response_dict['responses']
+
+		if response_dict and response_dict['status_code'] == 1:
+			if 'item_capture_mult' in responses['USE_ITEM_CAPTURE']:
+				for rate in catch_rate_by_ball:
+					new_catch_rate_by_ball.append(rate * responses['USE_ITEM_CAPTURE']['item_capture_mult'])
+				
+				self.logger.info(
+					'Threw a %s! Catch rate with %s is now: %s',
+					self.item_list[str(berry_id)],
+					self.item_list[str(current_ball)],
+					'{0:.2f}%'.format(new_catch_rate_by_ball[current_ball] * 100)
+				)
+
+			return new_catch_rate_by_ball
+
 	def normalized_reticle_size(self, factor):
 		minimum = 1.0
 		maximum = 1.950
@@ -258,17 +311,32 @@ class Bot(object):
 		)
 
 		responses = requests.get(URL + 'raw_data?pokemon=true&pokestops=false&gyms=false&scanned=false&spawnpoints=false', verify=False).json()['pokemons']
-		pokemons = sorted(responses, key=lambda k: k['disappear_time']) 
 
-		return pokemons
+		rare_rate = {
+			u'常見': 0,
+			u'少見': 1,
+			u'罕見': 2,
+			u'非常罕見': 3,
+			u'超罕見': 4
+		}
+
+		for pokemon in responses:
+			pokemon['pokemon_rarity'] = rare_rate[pokemon['pokemon_rarity']]
+
+		responses = sorted(responses, key=lambda k: k['disappear_time']) 
+
+		if self.config['rare_first']:
+			responses = sorted(responses, key=lambda k: k['pokemon_rarity'], reverse=True) 
+
+		return responses
 
 	def create_encounter_call(self, pokemon):		
 		time.sleep(0.1)
 		response_dict = self.api.encounter(
 			encounter_id = long(base64.b64decode(pokemon['encounter_id'])),
 			spawn_point_id = pokemon['spawnpoint_id'],
-			player_latitude = self.lat,
-			player_longitude = self.lng
+			player_latitude = pokemon['latitude'],
+			player_longitude = pokemon['longitude']
 		)['responses']['ENCOUNTER']
 
 		return response_dict
@@ -351,6 +419,7 @@ class Bot(object):
 					self.lat,
 					self.lng
 				)
+			
 			time.sleep(1)
 			dist = gpxpy.geo.haversine_distance(
 				self.lat,
@@ -489,6 +558,7 @@ class Bot(object):
 		return player_data
 
 	def set_location(self, lat, lng):
+		time.sleep(0.5)
 		self.api.set_position(lat, lng, 0.0)
 
 		user_location = os.path.join(_base_dir, 'data', 'last-location-' + self.config['username'] + '.json')
