@@ -97,7 +97,7 @@ class Catch(BaseModel):
 	def check_catch_count(name):
 		q = Catch.delete().where(
 			Catch.user == User.select().where(User.username == name),
-			created_date < datetime.datetime.now() - datetime.timedelta(hours=12)
+			Catch.created_date < datetime.datetime.now() - datetime.timedelta(hours=12)
 		)
 		q.execute()
 
@@ -121,7 +121,7 @@ class Pokestop(BaseModel):
 	def check_spin_count(name):
 		q = Pokestop.delete().where(
 			Pokestop.user == User.select().where(User.username == name),
-			created_date < datetime.datetime.now() - datetime.timedelta(hours=6)
+			Pokestop.created_date < datetime.datetime.now() - datetime.timedelta(hours=12)
 		)
 		q.execute()
 

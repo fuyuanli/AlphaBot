@@ -3,17 +3,12 @@
 A bot for PokemonGo.
 This bot is totally not acted like human, used at your own risk.
 
-There is still lots of bug, it will be fix very soon.
-
 ## Features
 - [x] Use magic to catch pokemons
 - [x] Search pokestops
 - [x] Farming
-- [ ] Gym battle 
-- [ ] Use berry
-- [ ] Hatch eggs
-- [ ] Incubate eggs
-- [ ] Cache location & Daily limit
+- [x] Cache location & Daily limit
+- [ ] More valuable pokemon feed
 
 ## Installation
 ```

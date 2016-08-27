@@ -71,7 +71,8 @@ class Bot(object):
 
 				self.check_limit()
 
-			except NotLoggedInException:
+			except (NotLoggedInException, TypeError) as e:
+				self.logger.error(e)
 				self.logger.info(
 					'Token Expired, wait for 20 seconds.'
 				)
@@ -131,10 +132,10 @@ class Bot(object):
 		spin_count = bot.models.Pokestop.check_spin_count(self.config['username'])
 
 		if catch_count >= self.config['daily_limit']['catch'] or spin_count >= self.config['daily_limit']['spin']:
-			self.logger.info(
-				'Reach the daily limit... Sleep for 12 hours...'
-			)
-			time.sleep(43200)
+			self.logger.info('Reach the daily limit... Sleep for 12 hours...')
+			for i in range(0, 12):
+				self.logger.info('Sleeping...')
+				time.sleep(3600)
 
 	def snipe_pokemon(self):
 		pokemons = self.get_pokemons()
