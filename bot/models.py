@@ -75,9 +75,61 @@ class Catch(BaseModel):
 	encounter_id = CharField(primary_key=True, max_length=50)
 	created_date = DateTimeField(default=datetime.datetime.now)
 
+	@staticmethod
+	def insert_catch(name, encounter_id):
+		Catch.create(
+			user = User.select().where(User.username == name),
+			encounter_id = encounter_id
+		)
+
+	@staticmethod
+	def check_catch(name, encounter_id):
+		catchs = Catch.select().where(
+			Catch.user == User.select().where(User.username == name),
+			Catch.encounter_id == encounter_id
+		).count()
+
+		if catchs == 0:
+			return False
+		return True
+
+	@staticmethod
+	def check_catch_count(name):
+		q = Catch.delete().where(
+			Catch.user == User.select().where(User.username == name),
+			created_date < datetime.datetime.now() - datetime.timedelta(hours=12)
+		)
+		q.execute()
+
+		catchs = Catch.select().where(
+			Catch.user == User.select().where(User.username == name)
+		).count()
+
+		return catchs
+
 class Pokestop(BaseModel):
 	user = ForeignKeyField(User, related_name='stops')
 	created_date = DateTimeField(default=datetime.datetime.now)
+
+	@staticmethod
+	def insert_spin(name):
+		Pokestop.create(
+			user = User.select().where(User.username == name),
+		)
+
+	@staticmethod
+	def check_spin_count(name):
+		q = Pokestop.delete().where(
+			Pokestop.user == User.select().where(User.username == name),
+			created_date < datetime.datetime.now() - datetime.timedelta(hours=6)
+		)
+		q.execute()
+
+		spins = Pokestop.select().where(
+			Pokestop.user == User.select().where(User.username == name)
+		).count()
+
+		return spins
 			
 def init_db():
 	db.connect()

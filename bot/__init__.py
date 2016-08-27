@@ -49,7 +49,6 @@ class Bot(object):
 		self.item_list = json.load(
 			open(os.path.join(_base_dir, 'data', 'items.json'))	
 		)
-		self.catched_pokemon = [None]
 		self.fort = None
 		self.api = None
 		self.lat = None
@@ -69,10 +68,16 @@ class Bot(object):
 					self.snipe_pokemon()
 					self.check_awarded_badges()
 					self.inventorys.check_pokemons()
+
+				self.check_limit()
+
 			except NotLoggedInException:
+				self.logger.info(
+					'Token Expired, wait for 20 seconds.'
+				)
+				time.sleep(20)
 				self.login()
 				continue
-		
 
 	def login(self):
 		self.api = pgoapi.PGoApi()
@@ -121,12 +126,22 @@ class Bot(object):
 					)
 				self.farming_mode = False
 
+	def check_limit(self):
+		catch_count = bot.models.Catch.check_catch_count(self.config['username'])
+		spin_count = bot.models.Pokestop.check_spin_count(self.config['username'])
+
+		if catch_count >= self.config['daily_limit']['catch'] or spin_count >= self.config['daily_limit']['spin']:
+			self.logger.info(
+				'Reach the daily limit... Sleep for 12 hours...'
+			)
+			time.sleep(43200)
+
 	def snipe_pokemon(self):
 		pokemons = self.get_pokemons()
 
 		snipe_count = 0
 		for pokemon_encounter in pokemons:
-			if pokemon_encounter['encounter_id'] not in self.catched_pokemon:
+			if pokemon_encounter['encounter_id'] and not bot.models.Catch.check_catch(self.config['username'], pokemon_encounter['encounter_id']):
 				if snipe_count >= self.config['catch_time_every_run']:
 					break
 
@@ -157,7 +172,7 @@ class Bot(object):
 
 				catch_rate = [0] + response['capture_probability']['capture_probability']
 				pokemon.id = self.do_catch(pokemon, catch_rate)
-				self.catched_pokemon.append(pokemon_encounter['encounter_id'])
+				bot.models.Catch.insert_catch(self.config['username'], pokemon_encounter['encounter_id'])
 				self.inventorys.pokemons.append(pokemon)
 				
 				snipe_count += 1
@@ -499,6 +514,9 @@ class Bot(object):
 
 	def trainer_info(self):
 		player = self.get_player_data()
+		self.logger = logging.getLogger(player['username'])
+		self.logger.setLevel(logging.INFO)
+
 		self.inventorys = Inventory(self.api, self.config, self.logger)
 		
 		pokecoins = 0
@@ -509,9 +527,6 @@ class Bot(object):
 
 		if 'amount' in player['currencies'][1]:
 			stardust = player['currencies'][1]['amount']
-
-		self.logger = logging.getLogger(player['username'])
-		self.logger.setLevel(logging.INFO)
 
 		self.logger.info('')
 
