@@ -17,7 +17,7 @@ logger = logging.getLogger('init')
 logger.setLevel(logging.INFO)
 
 def main():
-	logger.info('Alpha Bot v1.0')
+	logger.info('Alpha Bot v1.1')
 	config = init_config()
 	setup_logging(config)
 	bot = Bot(config)
