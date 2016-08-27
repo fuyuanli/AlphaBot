@@ -3,7 +3,6 @@
     "username": "ACCOUNT",
     "password": "PASSWORD",
     "location": "24.787466, 120.983666",
-    "gmapkey": "",
 
     "encrypt_location": "encrypt.so",
 
@@ -14,6 +13,7 @@
         "Potion": 10,
         "Super Potion": 20,
         "Hyper Potion": 30,
+        "Max Potion": 30,
         "Revive": 30,
         "Razz Berry": 30
     },
