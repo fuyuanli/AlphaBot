@@ -382,6 +382,7 @@ class Bot(object):
 
 
 				items_awarded = self.get_items_awarded_from_fort_spinned(response_dict)
+				bot.models.Pokestop.insert_spin(self.config['username'])
 
 				if experience_awarded or items_awarded:
 					self.logger.info(
