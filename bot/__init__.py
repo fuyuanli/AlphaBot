@@ -12,6 +12,7 @@ from random import uniform
 # import Pokemon Go API lib
 from pgoapi import pgoapi
 from pgoapi import utilities
+from pgoapi.exceptions import NotLoggedInException
 
 from bot.base_dir import _base_dir
 from bot.item_list import Item
@@ -19,6 +20,7 @@ from bot.pokemon import Pokemon
 from bot.fort import Fort
 from bot.inventory import Inventory
 
+import bot.models
 import bot.fort
 import bot.inventory
 
@@ -60,12 +62,16 @@ class Bot(object):
 		self.login()
 
 		while True:
-			self.spin_fort()
-			self.check_farming()
-			if not self.farming_mode:
-				self.snipe_pokemon()
-				self.check_awarded_badges()
-				self.inventorys.check_pokemons()
+			try:
+				self.spin_fort()
+				self.check_farming()
+				if not self.farming_mode:
+					self.snipe_pokemon()
+					self.check_awarded_badges()
+					self.inventorys.check_pokemons()
+			except NotLoggedInException:
+				self.login()
+				continue
 		
 
 	def login(self):
@@ -560,51 +566,22 @@ class Bot(object):
 	def set_location(self, lat, lng):
 		time.sleep(0.5)
 		self.api.set_position(lat, lng, 0.0)
-
-		user_location = os.path.join(_base_dir, 'data', 'last-location-' + self.config['username'] + '.json')
-		location_json = {}
-		with open(user_location) as f:
-			location_json = json.load(f)
-		with open(user_location, 'w') as outfile:
-			json.dump({
-				'lat': self.lat,
-				'lng': self.lng,
-				'start_lat': location_json['start_lat'],
-				'start_lng': location_json['start_lng']
-			}, outfile)
+		bot.models.Location.set_location(self.config['username'], lat, lng)
 
 	def get_location(self):
-		user_location = os.path.join(_base_dir, 'data', 'last-location-' + self.config['username'] + '.json')
 		lat, lng = self.config['location'].split(',')
+		cache_location = bot.models.Location.check_location(self.config['username'], lat, lng)
+		lat, lng = bot.models.Location.get_location(self.config['username'])
 		
-		if os.path.isfile(user_location):
-			location_json = {}
-			with open(user_location) as f:
-				location_json = json.load(f)
+		self.lat = lat
+		self.lng = lng
 
-			if location_json['start_lat'] == float(lat.strip()) and location_json['start_lng'] == float(lng.strip()):
-				self.lat = location_json['lat']
-				self.lng = location_json['lng']
-
-				self.logger.info(
-					'Get previous location - %f, %f',
-					self.lat,
-					self.lng
-				)
-
-				return 
-
-		self.lat = float(lat.strip())
-		self.lng = float(lng.strip())
-
-		with open(user_location, 'w') as outfile:
-			json.dump({
-				'lat': self.lat,
-				'lng': self.lng,
-				'start_lat': self.lat,
-				'start_lng': self.lng
-			}, outfile)
-
+		if cache_location:
+			self.logger.info(
+				'Get previous location - %f, %f',
+				self.lat,
+				self.lng
+			)
 
 	def check_level(self):
 		if self.inventorys.exp >= self.inventorys.next_exp:

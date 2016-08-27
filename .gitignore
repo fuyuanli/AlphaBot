@@ -110,9 +110,8 @@ src/
 configs/*
 !configs/config.json.example
 
-# Personal data
-data/last-location-*.json
-data/daily-limit-*.json
+# Sqlite DB
+*.db
 
 # Virtualenv folders
 bin/
