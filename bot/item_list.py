@@ -1,5 +1,6 @@
-from enum import Enum
+# -*- coding: utf-8 -*-
 
+from enum import Enum
 
 class Item(Enum):
     ITEM_UNKNOWN = 0

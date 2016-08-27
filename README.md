@@ -3,11 +3,12 @@
 A bot for PokemonGo.
 This bot is totally not acted like human, used at your own risk.
 
-There is still lots of bug, it will be fix very soon.
-
 ## Features
-I think I got lost in putting more feature into the bot but miss the main core of the bot - Get exp as fast as possible.
-I will delete most of the code, and implement catching pokemon in the future.
+- [x] Use magic to catch pokemons
+- [x] Search pokestops
+- [x] Farming
+- [x] Cache location & Daily limit
+- [ ] More valuable pokemon feed
 
 ## Installation
 ```

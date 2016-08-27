@@ -3,17 +3,17 @@
     "username": "ACCOUNT",
     "password": "PASSWORD",
     "location": "24.787466, 120.983666",
-    "gmapkey": "",
 
     "encrypt_location": "encrypt.so",
 
-    "step_diameter": 4,
+    "step_diameter": 10,
 
     "item_limit": {
         "Pokeball": 100,
         "Potion": 10,
         "Super Potion": 20,
         "Hyper Potion": 30,
+        "Max Potion": 30,
         "Revive": 30,
         "Razz Berry": 30
     },
@@ -34,6 +34,12 @@
     },
 
     "catch_time_every_run": 5,
+    "rare_first": true,
+
+    "daily_limit": {
+        "catch": 990,
+        "spin": 1990
+    },
 
     "transfer_filter": {
         "below_iv": 0.8,

@@ -8,6 +8,8 @@ import time
 from bot.base_dir import _base_dir
 from bot import Bot
 
+import bot.models
+
 logging.basicConfig(
 	level=logging.INFO,
 	format='%(asctime)s [%(name)s] [%(levelname)s] %(message)s')
@@ -15,9 +17,9 @@ logger = logging.getLogger('init')
 logger.setLevel(logging.INFO)
 
 def main():
-	logger.info('Alpha Bot v1.0')
+	logger.info('Alpha Bot v1.1')
 	config = init_config()
-	setup_logging()
+	setup_logging(config)
 	bot = Bot(config)
 	bot.start()
 
@@ -39,7 +41,7 @@ def init_config():
 
 	return config
 
-def setup_logging():
+def setup_logging(config):
 	logging.getLogger("requests").setLevel(logging.ERROR)
 	logging.getLogger("websocket").setLevel(logging.ERROR)
 	logging.getLogger("socketio").setLevel(logging.ERROR)
@@ -47,6 +49,9 @@ def setup_logging():
 	logging.getLogger("socketIO-client").setLevel(logging.ERROR)
 	logging.getLogger("pgoapi").setLevel(logging.ERROR)
 	logging.getLogger("rpc_api").setLevel(logging.ERROR)
+
+	bot.models.init_db()
+	bot.models.User.create_user(config['username'])
 
 
 if __name__ == '__main__':

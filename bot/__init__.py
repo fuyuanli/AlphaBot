@@ -11,24 +11,24 @@ from random import uniform
 
 # import Pokemon Go API lib
 from pgoapi import pgoapi
-from pgoapi import utilities as util
+from pgoapi import utilities
+from pgoapi.exceptions import NotLoggedInException
 
 from bot.base_dir import _base_dir
 from bot.item_list import Item
 from bot.pokemon import Pokemon
-from bot.gym import Gym
-from bot.battle_action import BattleAction
+from bot.fort import Fort
+from bot.inventory import Inventory
+
+import bot.models
+import bot.fort
+import bot.inventory
 
 logging.basicConfig(
 	level=logging.INFO,
 	format='%(asctime)s [%(name)s] [%(levelname)s] %(message)s')
 logger = logging.getLogger('init')
 logger.setLevel(logging.INFO)
-
-SPIN_REQUEST_RESULT_SUCCESS = 1
-SPIN_REQUEST_RESULT_OUT_OF_RANGE = 2
-SPIN_REQUEST_RESULT_IN_COOLDOWN_PERIOD = 3
-SPIN_REQUEST_RESULT_INVENTORY_FULL = 4
 
 CATCH_STATUS_SUCCESS = 1
 CATCH_STATUS_FAILED = 2
@@ -37,11 +37,6 @@ CATCH_STATUS_VANISHED = 3
 ENCOUNTER_STATUS_SUCCESS = 1
 ENCOUNTER_STATUS_NOT_IN_RANGE = 5
 ENCOUNTER_STATUS_POKEMON_INVENTORY_FULL = 7
-
-ITEM_POKEBALL = 1
-ITEM_GREATBALL = 2
-ITEM_ULTRABALL = 3
-ITEM_RAZZBERRY = 701
 
 URL = 'http://p.cve.tw:5566/'
 
@@ -54,271 +49,100 @@ class Bot(object):
 		self.item_list = json.load(
 			open(os.path.join(_base_dir, 'data', 'items.json'))	
 		)
-		self.catched_pokemon = [None]
 		self.fort = None
 		self.api = None
 		self.lat = None
 		self.lng = None
-		self.latest_inventory = None
 		self.logger = logger
-		self.level = 0
 		self.farming_mode = False
+		self.inventorys = None
 
 	def start(self):
 		self.login()
 
 		while True:
 			try:
-				#self.gym_battle()
 				self.spin_fort()
 				self.check_farming()
 				if not self.farming_mode:
 					self.snipe_pokemon()
 					self.check_awarded_badges()
-					self.check_all_pokemon()
-			except:
-				try:
-					self.login()
-				except:
-					continue
+					self.inventorys.check_pokemons()
+
+				self.check_limit()
+
+			except (NotLoggedInException, TypeError) as e:
+				self.logger.error(e)
+				self.logger.info(
+					'Token Expired, wait for 20 seconds.'
+				)
+				time.sleep(20)
+				self.login()
 				continue
-		
 
 	def login(self):
 		self.api = pgoapi.PGoApi()
 
 		self.get_location()
 
-		self.logger.info('Set location - ' + str(self.lat) + ', ' + str(self.lng))
+		self.logger.info(
+			'Set location - %f, %f',
+			self.lat,
+			self.lng
+		)
 		self.set_location(self.lat, self.lng)
 		self.api.set_authentication(
 			provider = self.config['auth_service'], 
 			username = self.config['username'],
-			password = self.config['password']
+			password = self.config['password'],
 		)
 		self.api.activate_signature(self.config['encrypt_location'])
 
 		self.trainer_info()
-		self.check_inventory()
-		self.check_all_pokemon()
-
-	def gym_battle(self):
-		gyms = self.nearst_gym()
-		gym_detail = self.get_gym_details(gyms)
-		gym = Gym(gym_detail, self.pokemon_list)
-		self.set_location(gym.lat, gym.lng)
-
-		best_pokemons = self.get_best_cp_pokemons()
-
-		#for i in range(0, len(gym.pokemon)):
-		battle_info = self.start_gym_battle(gym, best_pokemons, 0)
-
-		self.do_gym_attack(gym, battle_info, best_pokemons[0])
-
-	def do_gym_attack(self, gym, battle_info, best_pokemon):
-		
-		action = BattleAction(gym, battle_info, best_pokemon, 0, -1, 0)
-		blank_action_info = self.blank_action(action)
-
-		target_index = 0
-		for log in blank_action_info.get('battle_log', {}).get('battle_actions', {}):
-			if 'target_index' in log:
-				target_index = log.get('target_index')
-				break
-
-		server_ms = blank_action_info.get('battle_log', {}).get('server_ms', 0)
-
-		actions = []
-		not_end = 1
-		last_retrieved_actions = action.last_retrieved_actions
-
-		count = 0
-		while not_end:
-			for i in range(1, 6):
-				real_action = BattleAction(gym, battle_info, best_pokemon, i, target_index, server_ms)
-				actions.append(real_action.get_action())
-
-			response_dict = self.api.attack_gym(
-				gym_id = action.gym_id[0],
-				battle_id = str(action.battle_id),
-				attack_actions = actions,
-				last_retrieved_actions = last_retrieved_actions,
-				player_latitude = self.lat,
-				player_longitude = self.lng
-			)['responses']['ATTACK_GYM']
-
-			not_end = response_dict.get('battle_log', {}).get('state', 1)
-			server_ms = response_dict.get('battle_log', {}).get('server_ms', 0)
-
-			if type(response_dict.get('battle_log', {}).get('battle_actions', {})) == list and response_dict.get('battle_log', {}) != None:
-				last_retrieved_actions = response_dict.get('battle_log', {}).get('battle_actions', {})[-1]
-			elif type(response_dict.get('battle_log', {}).get('battle_actions', {})) == dict and response_dict.get('battle_log', {}) != None:
-				last_retrieved_actions = response_dict.get('battle_log', {})
-
-			time.sleep(0.5)
-		
-
-	def blank_action(self, action):
-		time.sleep(1)
-		response_dict = self.api.attack_gym(
-			gym_id = action.gym_id[0],
-			battle_id = str(action.battle_id),
-			player_latitude = self.lat,
-			player_longitude = self.lng,
-		)['responses']['ATTACK_GYM']
-
-		return response_dict
-
-	def start_gym_battle(self, gym, best_pokemons , against):
-		time.sleep(1)
-		onboard = []
-		if gym.owned_team == 1:
-			self.logger.info(
-				'Same team gym, get 1 pokemon on.'
-			)
-			onboard.append(best_pokemons[0].id)
-		else:
-			self.logger.info(
-				'Different team gym, get 6 pokemon on.'
-			)
-			for pokemon in best_pokemons[:6]:
-				onboard.append(pokemon.id)
-
-		response_dict = self.api.start_gym_battle(
-			gym_id = gym.id,
-			attacking_pokemon_ids = onboard,
-			defending_pokemon_id = gym.pokemons[against].id,
-			player_latitude = self.lat,
-			player_longitude = self.lng
-		)['responses']['START_GYM_BATTLE']
-
-		return response_dict
-
-	def get_best_cp_pokemons(self):
-		best_cp = []
-		pokemons = self.current_pokemons_inventory()
-		for pokemon_data in pokemons:
-			if not pokemon_data.get('is_egg', None):
-				pokemon = Pokemon(self.pokemon_list, pokemon_data, None)
-				best_cp.append(pokemon)
-
-		best_cp = sorted(best_cp, key=lambda x: x.cp, reverse=True)
-		return best_cp[:6]
+		self.inventorys.check_items()
+		self.inventorys.check_pokemons()
 
 	def check_farming(self):
 		pokemonball_rate = self.config['farming_mode']['all_pokeball']
 		potion_rate = self.config['farming_mode']['all_potion']
 		revive_rate = self.config['farming_mode']['all_revive']
 
-		items_stock = self.current_inventory()
+		items_stock = self.inventorys.items
 
 		balls = items_stock[1] + items_stock[2] + items_stock[3] + items_stock[4]
 		potion = items_stock[101] + items_stock[102] + items_stock[103] + items_stock[104]
 		revive = items_stock[201] + items_stock[202]
 
 		if balls < pokemonball_rate['min']:
-			if level >= 5 and (potion < potion_rate['min'] or revive < revive_rate['min']):
+			if self.inventorys.level >= 5 and (balls < pokemonball_rate['min'] or potion < potion_rate['min'] or revive < revive_rate['min']):
 				self.farming_mode = True
 				self.logger.info(
 					'Farming for the items...'
 				)
 		elif balls >= pokemonball_rate['max']:
-		 	if level >= 5 and (potion >= potion_rate['max'] or revive >= revive_rate['max']):
+			if self.inventorys.level >= 5 and (balls >= pokemonball_rate['max'] or potion >= potion_rate['max'] or revive >= revive_rate['max']):
 				if self.farming_mode:
 					self.logger.info(
 						'Back to normal, catch\'em all!'
 					)
 				self.farming_mode = False
 
-	def check_all_pokemon(self):
-		pokemons = self.current_pokemons_inventory()
-		for pokemon_data in pokemons:
-			if not pokemon_data.get('is_egg', None):
-				pokemon = Pokemon(self.pokemon_list, pokemon_data, None)
-				self.pokemon_if_transfer(pokemon)
-				self.pokemon_revive(pokemon)
-				self.pokemon_potion(pokemon)
+	def check_limit(self):
+		catch_count = bot.models.Catch.check_catch_count(self.config['username'])
+		spin_count = bot.models.Pokestop.check_spin_count(self.config['username'])
 
-	def pokemon_revive(self, pokemon):
-		if pokemon.current_hp == 0:
-			self.logger.info(
-				'use Revive on %s.',
-				pokemon.name
-			)
-
-			time.sleep(1)
-			self.api.use_item_revive(
-				item_id = 201,
-				pokemon_id = pokemon.id
-			)
-
-			pokemon.current_hp += int(pokemon_max_hp / 2)
-
-	def pokemon_potion(self, pokemon):
-		while pokemon.current_hp < pokemon.max_hp:
-			self.logger.info(
-				'use Potion on %s.',
-				pokemon.name
-			)
-
-			time.sleep(1)
-			self.api.use_item_potion(
-				item_id = 101,
-				pokemon_id = pokemon.id
-			)
-
-			pokemon.current_hp += 20
-
-			time.sleep(1)
-			self.api.use_item_potion(
-				item_id = 102,
-				pokemon_id = pokemon.id
-			)
-
-			pokemon.current_hp += 50
-
-			time.sleep(1)
-			self.api.use_item_potion(
-				item_id = 103,
-				pokemon_id = pokemon.id
-			)
-
-			pokemon.current_hp += 200
-
-	def pokemon_if_transfer(self, pokemon):
-		if self.config['transfer_filter']['logic'] == 'or':
-			if pokemon.cp < self.config['transfer_filter']['below_cp'] and pokemon.iv() < self.config['transfer_filter']['below_iv']:
-				self.release_pokemon(pokemon)
-				self.logger.info(
-					'Tranferred %s [CP %s] [IV %s] [A/D/S %s]',
-					pokemon.name,
-					pokemon.cp,
-					pokemon.iv(),
-					pokemon.iv_display()
-				)
-		else:
-			if pokemon.cp < self.config['transfer_filter']['below_cp'] or pokemon.iv() < self.config['transfer_filter']['below_iv']:
-				self.release_pokemon(pokemon)
-				self.logger.info(
-					'Tranferred %s [CP %s] [IV %s] [A/D/S %s]',
-					pokemon.name,
-					pokemon.cp,
-					pokemon.iv(),
-					pokemon.iv_display()
-				)
-
-	def release_pokemon(self, pokemon):
-		time.sleep(0.1)
-		self.api.release_pokemon(
-			pokemon_id = pokemon.id
-		)
+		if catch_count >= self.config['daily_limit']['catch'] or spin_count >= self.config['daily_limit']['spin']:
+			self.logger.info('Reach the daily limit... Sleep for 12 hours...')
+			for i in range(0, 12):
+				self.logger.info('Sleeping...')
+				time.sleep(3600)
 
 	def snipe_pokemon(self):
 		pokemons = self.get_pokemons()
 
 		snipe_count = 0
 		for pokemon_encounter in pokemons:
-			if pokemon_encounter['encounter_id'] not in self.catched_pokemon:
+			if pokemon_encounter['encounter_id'] and not bot.models.Catch.check_catch(self.config['username'], pokemon_encounter['encounter_id']):
 				if snipe_count >= self.config['catch_time_every_run']:
 					break
 
@@ -348,24 +172,25 @@ class Bot(object):
 				self.set_location(self.lat, self.lng)
 
 				catch_rate = [0] + response['capture_probability']['capture_probability']
-				self.do_catch(pokemon, catch_rate)
-				self.catched_pokemon.append(pokemon_encounter['encounter_id'])
+				pokemon.id = self.do_catch(pokemon, catch_rate)
+				bot.models.Catch.insert_catch(self.config['username'], pokemon_encounter['encounter_id'])
+				self.inventorys.pokemons.append(pokemon)
 				
 				snipe_count += 1
 				
 
 	def do_catch(self, pokemon, catch_rate_by_ball):
-		berry_id = ITEM_RAZZBERRY
-		maximum_ball = ITEM_ULTRABALL
+		berry_id = bot.inventory.ITEM_RAZZ_BERRY
+		maximum_ball = bot.inventory.ITEM_ULTRA_BALL
 		ideal_catch_rate_before_throw = 0.35
+		berry_count = self.inventorys.items[berry_id]
 
-		items_stock = self.current_inventory()
-
+		used_berry = False
 		while True:
-			current_ball = ITEM_POKEBALL
-			while items_stock[current_ball] == 0 and current_ball < maximum_ball:
+			current_ball = bot.inventory.ITEM_POKE_BALL
+			while self.inventorys.items[current_ball] == 0 and current_ball < maximum_ball:
 				current_ball += 1
-			if items_stock[current_ball] == 0:
+			if self.inventorys.items[current_ball] == 0:
 				self.logger.warning(
 					'No usable pokeball found.'
 				)
@@ -374,22 +199,42 @@ class Bot(object):
 			next_ball = current_ball
 			while next_ball < maximum_ball:
 				next_ball += 1
-				num_next_balls += items_stock[next_ball]
+				num_next_balls += self.inventorys.items[next_ball]
+
+			berries_to_spare = berry_count > num_next_balls + 30
+
+			if catch_rate_by_ball[current_ball] < ideal_catch_rate_before_throw and berries_to_spare and not used_berry:
+				new_catch_rate_by_ball = self.use_berry(berry_id, berry_count, pokemon.encounter_id[0], str(pokemon.spawn_point_id), catch_rate_by_ball, current_ball)
+				if new_catch_rate_by_ball != catch_rate_by_ball:
+					catch_rate_by_ball = new_catch_rate_by_ball
+					self.inventorys.items[berry_id] -= 1
+					berry_count -= 1
+					used_berry = True
 
 			best_ball = current_ball
 			while best_ball < maximum_ball:
 				best_ball += 1
-				if catch_rate_by_ball[current_ball] < ideal_catch_rate_before_throw and items_stock[best_ball] > 0:
+				if catch_rate_by_ball[current_ball] < ideal_catch_rate_before_throw and self.inventorys.items[best_ball] > 0:
 					current_ball = best_ball
+
+			if catch_rate_by_ball[current_ball] < ideal_catch_rate_before_throw and berry_count > 0 and not used_berry:
+				new_catch_rate_by_ball = self.use_berry(berry_id, berry_count, pokemon.encounter_id[0], str(pokemon.spawn_point_id), catch_rate_by_ball, current_ball)
+				if new_catch_rate_by_ball != catch_rate_by_ball:
+					catch_rate_by_ball = new_catch_rate_by_ball
+					self.inventorys.items[berry_id] -= 1
+					berry_count -= 1
+					used_berry = True
 
 			reticle_size_parameter = self.normalized_reticle_size(self.config['catch_randomize_reticle_factor'])
 			spin_modifier_parameter = self.spin_modifier(self.config['catch_randomize_spin_factor'])
+
+			self.inventorys.items[current_ball] -= 1
 
 			self.logger.info(
 				'Used %s, with chance %s - %s left.',
 				self.item_list[str(current_ball)],
 				'{0:.2f}%'.format(catch_rate_by_ball[current_ball] * 100),
-				str(items_stock[current_ball])
+				str(self.inventorys.items[current_ball])
 			)
 
 			time.sleep(0.1)
@@ -431,8 +276,42 @@ class Bot(object):
 					pokemon.iv_display(),
 					sum(response_dict['responses']['CATCH_POKEMON']['capture_award']['xp'])
 				)
+				self.inventorys.exp += sum(response_dict['responses']['CATCH_POKEMON']['capture_award']['xp'])
 
-			break
+			return response_dict['responses']['CATCH_POKEMON'].get('captured_pokemon_id', 0)
+
+	def use_berry(self, berry_id, berry_count, encounter_id, spawn_point_id, catch_rate_by_ball, current_ball):
+		new_catch_rate_by_ball = []
+
+		self.logger.info(
+			'Catch rate of %s with %s is low. Throwing %s (have %d)',
+			'{0:.2f}%'.format(catch_rate_by_ball[current_ball] * 100),
+			self.item_list[str(current_ball)],
+			self.item_list[str(berry_id)],
+			int(berry_count)
+		)
+
+		response_dict = self.api.use_item_capture(
+			item_id = berry_id,
+			encounter_id = encounter_id,
+			spawn_point_id = spawn_point_id
+		)
+
+		responses = response_dict['responses']
+
+		if response_dict and response_dict['status_code'] == 1:
+			if 'item_capture_mult' in responses['USE_ITEM_CAPTURE']:
+				for rate in catch_rate_by_ball:
+					new_catch_rate_by_ball.append(rate * responses['USE_ITEM_CAPTURE']['item_capture_mult'])
+				
+				self.logger.info(
+					'Threw a %s! Catch rate with %s is now: %s',
+					self.item_list[str(berry_id)],
+					self.item_list[str(current_ball)],
+					'{0:.2f}%'.format(new_catch_rate_by_ball[current_ball] * 100)
+				)
+
+			return new_catch_rate_by_ball
 
 	def normalized_reticle_size(self, factor):
 		minimum = 1.0
@@ -448,25 +327,38 @@ class Bot(object):
 			minimum + (maximum - minimum) * factor,
 			maximum)
 
-
-
 	def get_pokemons(self):
 		self.logger.info(
 			'Do some magic to get pokemons..'
 		)
 
-		responses = requests.get(URL + 'raw_data?pokemon=true&pokestops=false&gyms=false&scanned=false&spawnpoints=false').json()['pokemons']
-		pokemons = sorted(responses, key=lambda k: k['disappear_time']) 
+		responses = requests.get(URL + 'raw_data?pokemon=true&pokestops=false&gyms=false&scanned=false&spawnpoints=false', verify=False).json()['pokemons']
 
-		return pokemons
+		rare_rate = {
+			u'常見': 0,
+			u'少見': 1,
+			u'罕見': 2,
+			u'非常罕見': 3,
+			u'超罕見': 4
+		}
+
+		for pokemon in responses:
+			pokemon['pokemon_rarity'] = rare_rate[pokemon['pokemon_rarity']]
+
+		responses = sorted(responses, key=lambda k: k['disappear_time']) 
+
+		if self.config['rare_first']:
+			responses = sorted(responses, key=lambda k: k['pokemon_rarity'], reverse=True) 
+
+		return responses
 
 	def create_encounter_call(self, pokemon):		
 		time.sleep(0.1)
 		response_dict = self.api.encounter(
 			encounter_id = long(base64.b64decode(pokemon['encounter_id'])),
 			spawn_point_id = pokemon['spawnpoint_id'],
-			player_latitude = self.lat,
-			player_longitude = self.lng
+			player_latitude = pokemon['latitude'],
+			player_longitude = pokemon['longitude']
 		)['responses']['ENCOUNTER']
 
 		return response_dict
@@ -476,9 +368,9 @@ class Bot(object):
 
 		time.sleep(1)
 		response_dict = self.api.fort_search(
-			fort_id = self.fort['id'],
-			fort_latitude = self.fort['latitude'],
-			fort_longitude = self.fort['longitude'],
+			fort_id = self.fort.id,
+			fort_latitude = self.fort.lat,
+			fort_longitude = self.fort.lng,
 			player_latitude = self.lat,
 			player_longitude = self.lng
 		)
@@ -486,11 +378,12 @@ class Bot(object):
 		if 'responses' in response_dict and 'FORT_SEARCH' in response_dict['responses']:
 			spin_details = response_dict['responses']['FORT_SEARCH']
 			spin_result = spin_details.get('result', -1)
-			if spin_result == SPIN_REQUEST_RESULT_SUCCESS:
+			if spin_result == bot.fort.SPIN_REQUEST_RESULT_SUCCESS:
 				experience_awarded = spin_details.get('experience_awarded', 0)
 
 
 				items_awarded = self.get_items_awarded_from_fort_spinned(response_dict)
+				bot.models.Pokestop.insert_spin(self.config['username'])
 
 				if experience_awarded or items_awarded:
 					self.logger.info(
@@ -499,15 +392,20 @@ class Bot(object):
 						items_awarded
 					)
 
-					self.check_inventory()
+					self.inventorys.exp += experience_awarded
+					self.inventorys.check_items()
 					self.check_level()
+			elif spin_result == bot.fort.SPIN_REQUEST_RESULT_INVENTORY_FULL:
+				self.logger.warning(
+					"Your bag is full, modify config to make sure the bag won't full."
+				)
+
 
 	def walk_to_fort(self):
 		self.nearst_fort()
-		fort_detail = self.fort_detail()
 
-		olatitude = fort_detail['latitude']
-		olongitude = fort_detail['longitude']
+		olatitude = self.fort.lat
+		olongitude = self.fort.lng
 
 		dist = closest = gpxpy.geo.haversine_distance(
 			self.lat, 
@@ -518,7 +416,7 @@ class Bot(object):
 
 		self.logger.info(
 			"Walk to %s at %f, %f. (%d seconds)",
-			fort_detail['name'],
+			self.fort.name,
 			olatitude,
 			olongitude,
 			int(dist / self.config['step_diameter'])
@@ -544,6 +442,7 @@ class Bot(object):
 					self.lat,
 					self.lng
 				)
+			
 			time.sleep(1)
 			dist = gpxpy.geo.haversine_distance(
 				self.lat,
@@ -556,7 +455,7 @@ class Bot(object):
 			if steps % 10 == 0:
 				self.logger.info(
 					"Walk to %s at %f, %f. (%d seconds)",
-					fort_detail['name'],
+					self.fort.name,
 					olatitude,
 					olongitude,
 					int(dist / self.config['step_diameter'])
@@ -570,17 +469,6 @@ class Bot(object):
 				self.lng
 			)
 
-	def fort_detail(self):
-		time.sleep(1)
-
-		response_dict = self.api.fort_details(
-			fort_id = self.fort['id'],
-			latitude = self.fort['latitude'],
-			longitude = self.fort['longitude']
-		)
-
-		return response_dict['responses']['FORT_DETAILS']
-
 	def nearst_fort(self):
 		cells = self.get_map_objects()
 		forts = []
@@ -591,36 +479,13 @@ class Bot(object):
 
 		for fort in forts:
 			if 'cooldown_complete_timestamp_ms' not in fort:
-				self.fort = fort
+				self.fort = Fort(fort, self.api)
 				break
-
-	def nearst_gym(self):
-		cells = self.get_map_objects()
-		gyms = []
-
-		for cell in cells:
-			if 'forts' in cell and len(cell['forts']):
-				gyms += cell['forts']
-
-		for gym in gyms:
-			if 'gym_points' in gym:
-				return gym
-
-	def get_gym_details(self, gym):
-		gym_details = self.api.get_gym_details(
-			gym_id = gym.get('id', 0),
-			player_latitude = self.lat,
-			player_longitude = self.lng,
-			gym_latitude = gym.get('latitude', None),
-			gym_longitude = gym.get('longitude', None)
-		)['responses']['GET_GYM_DETAILS']
-
-		return gym_details
 
 	def get_map_objects(self):
 		time.sleep(1)
 
-		cell_id = util.get_cell_ids(self.lat, self.lng)
+		cell_id = utilities.get_cell_ids(self.lat, self.lng)
 		timestamp = [0, ] * len(cell_id) 
 
 		map_dict = self.api.get_map_objects(
@@ -649,13 +514,12 @@ class Bot(object):
 		
 		return map_cells
 
-
 	def trainer_info(self):
 		player = self.get_player_data()
-		items_stock = self.current_inventory()
-		
-		self.check_level()
-		info = self.get_stats()
+		self.logger = logging.getLogger(player['username'])
+		self.logger.setLevel(logging.INFO)
+
+		self.inventorys = Inventory(self.api, self.config, self.logger)
 		
 		pokecoins = 0
 		stardust = 0
@@ -666,15 +530,12 @@ class Bot(object):
 		if 'amount' in player['currencies'][1]:
 			stardust = player['currencies'][1]['amount']
 
-		self.logger = logging.getLogger(player['username'])
-		self.logger.setLevel(logging.INFO)
-
 		self.logger.info('')
 
 		self.logger.info(
 			'Trainer Name: ' + str(player['username']) +
-			' | Lv: ' + str(info.get('level', 0)) + 
-			' (' + str(info.get('experience', 0)) + '/' + str(info.get('next_level_xp', 0)) + ')'
+			' | Lv: ' + str(self.inventorys.level) + 
+			' (' + str(self.inventorys.exp) + '/' + str(self.inventorys.next_exp) + ')'
 		)
 
 		self.logger.info(
@@ -683,35 +544,35 @@ class Bot(object):
 		)
 
 		self.logger.info(
-			'PokeBalls: ' + str(items_stock[1]) +
-			' | GreatBalls: ' + str(items_stock[2]) +
-			' | UltraBalls: ' + str(items_stock[3]) +
-			' | MasterBalls: ' + str(items_stock[4]))
+			'PokeBalls: ' + str(self.inventorys.items[1]) +
+			' | GreatBalls: ' + str(self.inventorys.items[2]) +
+			' | UltraBalls: ' + str(self.inventorys.items[3]) +
+			' | MasterBalls: ' + str(self.inventorys.items[4]))
 
 		self.logger.info(
-			'RazzBerries: ' + str(items_stock[701]) +
-			' | BlukBerries: ' + str(items_stock[702]) +
-			' | NanabBerries: ' + str(items_stock[703]))
+			'RazzBerries: ' + str(self.inventorys.items[701]) +
+			' | BlukBerries: ' + str(self.inventorys.items[702]) +
+			' | NanabBerries: ' + str(self.inventorys.items[703]))
 
 		self.logger.info(
-			'LuckyEgg: ' + str(items_stock[301]) +
-			' | Incubator: ' + str(items_stock[902]) +
-			' | TroyDisk: ' + str(items_stock[501]))
+			'LuckyEgg: ' + str(self.inventorys.items[301]) +
+			' | Incubator: ' + str(self.inventorys.items[902]) +
+			' | TroyDisk: ' + str(self.inventorys.items[501]))
 
 		self.logger.info(
-			'Potion: ' + str(items_stock[101]) +
-			' | SuperPotion: ' + str(items_stock[102]) +
-			' | HyperPotion: ' + str(items_stock[103]) +
-			' | MaxPotion: ' + str(items_stock[104]))
+			'Potion: ' + str(self.inventorys.items[101]) +
+			' | SuperPotion: ' + str(self.inventorys.items[102]) +
+			' | HyperPotion: ' + str(self.inventorys.items[103]) +
+			' | MaxPotion: ' + str(self.inventorys.items[104]))
 
 		self.logger.info(
-			'Incense: ' + str(items_stock[401]) +
-			' | IncenseSpicy: ' + str(items_stock[402]) +
-			' | IncenseCool: ' + str(items_stock[403]))
+			'Incense: ' + str(self.inventorys.items[401]) +
+			' | IncenseSpicy: ' + str(self.inventorys.items[402]) +
+			' | IncenseCool: ' + str(self.inventorys.items[403]))
 
 		self.logger.info(
-			'Revive: ' + str(items_stock[201]) +
-			' | MaxRevive: ' + str(items_stock[202]))
+			'Revive: ' + str(self.inventorys.items[201]) +
+			' | MaxRevive: ' + str(self.inventorys.items[202]))
 
 	def get_player_data(self):
 		time.sleep(1)
@@ -720,110 +581,39 @@ class Bot(object):
 		return player_data
 
 	def set_location(self, lat, lng):
-		time.sleep(0.1)
+		time.sleep(0.5)
 		self.api.set_position(lat, lng, 0.0)
+		bot.models.Location.set_location(self.config['username'], lat, lng)
 
 	def get_location(self):
-		lat, lon = self.config['location'].split(',')
-		self.lat = float(lat.strip())
-		self.lng = float(lon.strip())
+		lat, lng = self.config['location'].split(',')
+		cache_location = bot.models.Location.check_location(self.config['username'], lat, lng)
+		lat, lng = bot.models.Location.get_location(self.config['username'])
+		
+		self.lat = lat
+		self.lng = lng
 
-	def current_pokemons_inventory(self):
-		inventory_dict = self.get_inventory()['responses']['GET_INVENTORY'][
-			'inventory_delta']['inventory_items']
-
-		pokemons_stock = []
-
-		for pokemons in inventory_dict:
-			pokemon_dict = pokemons.get('inventory_item_data', {}).get('pokemon_data', {})
-			if pokemon_dict:
-				pokemons_stock.append(pokemon_dict)
-
-		return pokemons_stock
-
-	def current_inventory(self):
-		inventory_dict = self.get_inventory()['responses']['GET_INVENTORY'][
-			'inventory_delta']['inventory_items']
-
-		items_stock = {x.value: 0 for x in list(Item)}
-
-		for item in inventory_dict:
-			item_dict = item.get('inventory_item_data', {}).get('item', {})
-			item_count = item_dict.get('count')
-			item_id = item_dict.get('item_id')
-
-			if item_count and item_id:
-				if item_id in items_stock:
-					items_stock[item_id] = item_count
-
-		return items_stock
-
-	def get_inventory(self):
-		time.sleep(1)
-		self.latest_inventory = self.api.get_inventory()
-
-		return self.latest_inventory
-
-	def check_inventory(self):
-		time.sleep(1)
-		inventory_dict = self.get_inventory()['responses']['GET_INVENTORY'][
-			'inventory_delta']['inventory_items']
-
-		for item in inventory_dict:
-			item_dict = item.get('inventory_item_data', {}).get('item', {})
-			item_count = item_dict.get('count')
-			item_id = item_dict.get('item_id')
-			
-			if item_count and item_id:
-				item_limit = self.config['item_limit'].get(self.item_list[str(item_id)])
-
-				if item_limit and item_count > item_limit:
-					self.recycle_inventory(item_id, item_count - item_limit)
-					self.logger.info(
-						'Recycled: %s x%d',
-						self.item_list[str(item_id)],
-						item_count - item_limit
-					)
-
-	def recycle_inventory(self, item_id, count):
-		time.sleep(1)
-		self.api.recycle_inventory_item(
-			item_id = item_id,
-			count = count
-		)
-
-	def get_stats(self):
-		stats = {}
-
-		time.sleep(1)
-		response_dict = self.api.get_inventory()['responses']['GET_INVENTORY'][
-			'inventory_delta']['inventory_items']
-
-		for items in response_dict:
-			stats = items.get('inventory_item_data', {}).get('player_stats', {})
-
-			if stats:
-				return stats
-
-		return stats
-
-	def check_level(self):
-		stats = self.get_stats()
-
-		if stats['level'] > self.level:
-			time.sleep(1)
-			self.api.level_up_rewards(
-				level = stats['level']
+		if cache_location:
+			self.logger.info(
+				'Get previous location - %f, %f',
+				self.lat,
+				self.lng
 			)
 
-			if self.level != 0:
-				self.logger.info(
-					'Level up from %d to %d.',
-					self.level,
-					stats['level']
-				)
+	def check_level(self):
+		if self.inventorys.exp >= self.inventorys.next_exp:
+			time.sleep(1)
+			self.api.level_up_rewards(
+				level = self.inventorys.level + 1
+			)
 
-			self.level = stats['level']
+			self.logger.info(
+				'Level up from %d to %d.',
+				self.inventorys.level,
+				self.inventorys.level + 1,
+			)
+
+			self.inventorys.get_inventory()
 
 	def get_items_awarded_from_fort_spinned(self, response_dict):
 		items_awarded = response_dict['responses']['FORT_SEARCH'].get('items_awarded', {})
@@ -835,6 +625,8 @@ class Bot(object):
 				item_awarded_name = self.item_list[str(item_awarded_id)]
 				item_awarded_count = item_awarded['item_count']
 
+				self.inventorys.items[item_awarded_id] += item_awarded_count
+
 				if not item_awarded_name in items:
 					items[item_awarded_name] = item_awarded_count
 				else:
@@ -842,13 +634,10 @@ class Bot(object):
 		
 		items_format_strings = ''
 		for key, val in items.items():
-			items_format_strings += key + ' x' + str(val) + ' '
+			items_format_strings += key + ' x' + str(val) + ', '
 		
-		return items_format_strings
+		return items_format_strings[:-2]
 
 	def check_awarded_badges(self):
 		time.sleep(1)
 		self.api.check_awarded_badges()
-
-
-

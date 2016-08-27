@@ -110,6 +110,9 @@ src/
 configs/*
 !configs/config.json.example
 
+# Sqlite DB
+*.db
+
 # Virtualenv folders
 bin/
 include/
