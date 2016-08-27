@@ -7,7 +7,7 @@
 
     "encrypt_location": "encrypt.so",
 
-    "step_diameter": 4,
+    "step_diameter": 10,
 
     "item_limit": {
         "Pokeball": 100,
@@ -35,6 +35,11 @@
 
     "catch_time_every_run": 5,
     "rare_first": true,
+
+    "daily_limit": {
+        "catch": 990,
+        "spin": 1990
+    },
 
     "transfer_filter": {
         "below_iv": 0.8,
