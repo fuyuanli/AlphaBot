@@ -13,6 +13,7 @@ from random import uniform
 from pgoapi import pgoapi
 from pgoapi import utilities
 from pgoapi.exceptions import NotLoggedInException
+from pgoapi.exceptions import AuthException
 
 from bot.base_dir import _base_dir
 from bot.item_list import Item
@@ -71,7 +72,7 @@ class Bot(object):
 
 				self.check_limit()
 
-			except (NotLoggedInException, TypeError) as e:
+			except (AuthException, NotLoggedInException, TypeError) as e:
 				self.logger.error(e)
 				self.logger.info(
 					'Token Expired, wait for 20 seconds.'
@@ -174,7 +175,9 @@ class Bot(object):
 				catch_rate = [0] + response['capture_probability']['capture_probability']
 				pokemon.id = self.do_catch(pokemon, catch_rate)
 				bot.models.Catch.insert_catch(self.config['username'], pokemon_encounter['encounter_id'])
-				self.inventorys.pokemons.append(pokemon)
+
+				if pokemon.id != 0:
+					self.inventorys.pokemons.append(pokemon)
 				
 				snipe_count += 1
 				
@@ -267,6 +270,8 @@ class Bot(object):
 					pokemon.name
 				)
 
+				return 0
+
 			elif catch_pokemon_status == CATCH_STATUS_SUCCESS:
 				self.logger.info(
 					'Captured %s! [CP %s] [IV %s] [%s] [+%d exp]',
@@ -278,7 +283,9 @@ class Bot(object):
 				)
 				self.inventorys.exp += sum(response_dict['responses']['CATCH_POKEMON']['capture_award']['xp'])
 
-			return response_dict['responses']['CATCH_POKEMON'].get('captured_pokemon_id', 0)
+				return response_dict['responses']['CATCH_POKEMON'].get('captured_pokemon_id', 0)
+
+			return None
 
 	def use_berry(self, berry_id, berry_count, encounter_id, spawn_point_id, catch_rate_by_ball, current_ball):
 		new_catch_rate_by_ball = []

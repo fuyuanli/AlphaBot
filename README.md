@@ -1,6 +1,7 @@
 # AlphaBot
 
 A bot for PokemonGo.
+
 This bot is totally not acted like human, used at your own risk.
 
 ## Features
