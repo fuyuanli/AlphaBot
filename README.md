@@ -9,7 +9,7 @@ This bot is totally not acted like human, used at your own risk.
 - [x] Search pokestops
 - [x] Farming
 - [x] Cache location & Daily limit
-- [ ] More valuable pokemon feed
+- [x] Valuable pokemon feed
 
 ## Installation
 ```
