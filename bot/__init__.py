@@ -149,11 +149,12 @@ class Bot(object):
 		for pokemon in best_cp_pokemons:
 			if pokemon.cp >= self.config['transfer_filter']['below_cp']:
 				self.logger.info(
-					'%s [CP %s] [IV %s] [A/D/S %s]',
+					'%s [CP %s] [IV %s] [Move 1] %s [Move 2] %s',
 					pokemon.name,
 					pokemon.cp,
 					pokemon.iv(),
-					pokemon.iv_display()
+					pokemon.move_1,
+					pokemon.move_2
 				)
 
 		best_iv_pokemons = sorted(self.inventorys.pokemons, key=lambda k: k.iv(), reverse=True) 
@@ -161,11 +162,12 @@ class Bot(object):
 		for pokemon in best_iv_pokemons:
 			if pokemon.cp >= self.config['transfer_filter']['below_iv']:
 				self.logger.info(
-					'%s [CP %s] [IV %s] [A/D/S %s]',
+					'%s [CP %s] [IV %s] [Move 1] %s [Move 2] %s',
 					pokemon.name,
 					pokemon.cp,
 					pokemon.iv(),
-					pokemon.iv_display()
+					pokemon.move_1,
+					pokemon.move_2
 				)
 
 	def snipe_pokemon(self):
