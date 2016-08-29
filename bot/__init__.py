@@ -106,6 +106,7 @@ class Bot(object):
 		self.trainer_info()
 		self.inventorys.check_items()
 		self.inventorys.check_pokemons()
+		self.dump_best_pokemons()
 
 	def check_farming(self):
 		pokemonball_rate = self.config['farming_mode']['all_pokeball']
@@ -141,6 +142,31 @@ class Bot(object):
 			for i in range(0, 12):
 				self.logger.info('Sleeping...')
 				time.sleep(3600)
+
+	def dump_best_pokemons(self):
+		best_cp_pokemons = sorted(self.inventorys.pokemons, key=lambda k: k.cp, reverse=True) 
+		self.logger.info('====== Best CP ======')
+		for pokemon in best_cp_pokemons:
+			if pokemon.cp >= self.config['transfer_filter']['below_cp']:
+				self.logger.info(
+					'%s [CP %s] [IV %s] [A/D/S %s]',
+					pokemon.name,
+					pokemon.cp,
+					pokemon.iv(),
+					pokemon.iv_display()
+				)
+
+		best_iv_pokemons = sorted(self.inventorys.pokemons, key=lambda k: k.iv(), reverse=True) 
+		self.logger.info('====== Best IV ======')
+		for pokemon in best_iv_pokemons:
+			if pokemon.cp >= self.config['transfer_filter']['below_iv']:
+				self.logger.info(
+					'%s [CP %s] [IV %s] [A/D/S %s]',
+					pokemon.name,
+					pokemon.cp,
+					pokemon.iv(),
+					pokemon.iv_display()
+				)
 
 	def snipe_pokemon(self):
 		pokemons = self.get_pokemons()
