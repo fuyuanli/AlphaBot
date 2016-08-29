@@ -15,6 +15,7 @@ from pgoapi import pgoapi
 from pgoapi import utilities
 from pgoapi.exceptions import NotLoggedInException
 from pgoapi.exceptions import AuthException
+from pgoapi.exceptions import ServerSideRequestThrottlingException
 
 from bot.base_dir import _base_dir
 from bot.item_list import Item
@@ -75,7 +76,7 @@ class Bot(object):
 
 				self.check_limit()
 
-			except (AuthException, NotLoggedInException, TypeError, KeyError) as e:
+			except (AuthException, NotLoggedInException, ServerSideRequestThrottlingException, TypeError, KeyError) as e:
 				self.logger.error(e)
 				self.logger.info(
 					'Token Expired, wait for 20 seconds.'
@@ -252,9 +253,6 @@ class Bot(object):
 					str(self.inventorys.items[current_ball])
 				)
 			except IndexError:
-				self.logger.error(
-					'Probably got softban, do unban..'
-				)
 				self.ban = True
 
 
@@ -271,11 +269,22 @@ class Bot(object):
 					normalized_hit_position = 1.0
 				)
 			else:
+				self.logger.error(
+					'Probably got softban, do unban..'
+				)
 				for i in range(0, 20):
 					time.sleep(1)
+					if self.inventorys.items[bot.inventory.ITEM_POKE_BALL] != 0:
+						current_ball = bot.inventory.ITEM_POKE_BALL
+					elif self.inventorys.items[bot.inventory.ITEM_GREAT_BALL] != 0:
+						current_ball = bot.inventory.ITEM_GREAT_BALL
+					elif self.inventorys.items[bot.inventory.ITEM_ULTRA_BALL] != 0:
+						current_ball = bot.inventory.ITEM_ULTRA_BALL
+
+					self.inventorys.items[current_ball] -= 1
 					response_dict = self.api.catch_pokemon(
 						encounter_id = pokemon.encounter_id[0],
-						pokeball = int(bot.inventory.ITEM_POKE_BALL),
+						pokeball = int(current_ball),
 						normalized_reticle_size=float(reticle_size_parameter),
 						spawn_point_id = str(pokemon.spawn_point_id),
 						hit_pokemon = 0,

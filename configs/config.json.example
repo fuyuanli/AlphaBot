@@ -20,7 +20,7 @@
 
     "farming_mode": {
         "all_pokeball": {
-            "min": 10,
+            "min": 20,
             "max": 100
         },
         "all_potion": { 
