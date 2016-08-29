@@ -75,7 +75,7 @@ class Bot(object):
 
 				self.check_limit()
 
-			except (AuthException, NotLoggedInException, TypeError) as e:
+			except (AuthException, NotLoggedInException, TypeError, KeyError) as e:
 				self.logger.error(e)
 				self.logger.info(
 					'Token Expired, wait for 20 seconds.'
