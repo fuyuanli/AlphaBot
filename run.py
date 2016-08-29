@@ -5,6 +5,7 @@ import logging
 import json
 import time
 import sys
+import platform
 
 from bot.base_dir import _base_dir
 from bot import Bot
