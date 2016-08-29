@@ -4,8 +4,6 @@
     "password": "PASSWORD",
     "location": "24.787466, 120.983666",
 
-    "encrypt_location": "encrypt.so",
-
     "step_diameter": 10,
 
     "item_limit": {
