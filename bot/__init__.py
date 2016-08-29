@@ -7,6 +7,7 @@ import time
 import gpxpy.geo
 import requests
 import base64
+import datetime
 from random import uniform
 
 # import Pokemon Go API lib
@@ -28,6 +29,7 @@ import bot.inventory
 logging.basicConfig(
 	level=logging.INFO,
 	format='%(asctime)s [%(name)s] [%(levelname)s] %(message)s')
+logFormatter = logging.Formatter('%(asctime)s [%(name)s] [%(levelname)s] %(message)s')
 logger = logging.getLogger('init')
 logger.setLevel(logging.INFO)
 
@@ -372,25 +374,31 @@ class Bot(object):
 			'Do some magic to get pokemons..'
 		)
 
-		responses = requests.get(URL + 'raw_data?pokemon=true&pokestops=false&gyms=false&scanned=false&spawnpoints=false', verify=False).json()['pokemons']
+		try:
+			responses = requests.get(URL + 'raw_data?pokemon=true&pokestops=false&gyms=false&scanned=false&spawnpoints=false', verify=False).json()['pokemons']
 
-		rare_rate = {
-			u'常見': 0,
-			u'少見': 1,
-			u'罕見': 2,
-			u'非常罕見': 3,
-			u'超罕見': 4
-		}
+			rare_rate = {
+				u'常見': 0,
+				u'少見': 1,
+				u'罕見': 2,
+				u'非常罕見': 3,
+				u'超罕見': 4
+			}
 
-		for pokemon in responses:
-			pokemon['pokemon_rarity'] = rare_rate[pokemon['pokemon_rarity']]
+			for pokemon in responses:
+				pokemon['pokemon_rarity'] = rare_rate[pokemon['pokemon_rarity']]
 
-		responses = sorted(responses, key=lambda k: k['disappear_time']) 
+			responses = sorted(responses, key=lambda k: k['disappear_time']) 
 
-		if self.config['rare_first']:
-			responses = sorted(responses, key=lambda k: k['pokemon_rarity'], reverse=True) 
+			if self.config['rare_first']:
+				responses = sorted(responses, key=lambda k: k['pokemon_rarity'], reverse=True) 
 
-		return responses
+			return responses
+		except requests.exceptions.ConnectionError:
+			self.logger.error(
+				'Feed server is unstable, skip this :('
+			)
+			return None
 
 	def create_encounter_call(self, pokemon):		
 		time.sleep(0.1)
@@ -560,6 +568,10 @@ class Bot(object):
 		player = self.get_player_data()
 		self.logger = logging.getLogger(player['username'])
 		self.logger.setLevel(logging.INFO)
+
+		fileHandler = logging.FileHandler("{0}/{1}.log".format('log', player['username'] + '-' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+		fileHandler.setFormatter(logFormatter)
+		self.logger.addHandler(fileHandler)
 
 		self.inventorys = Inventory(self.api, self.config, self.logger)
 		
