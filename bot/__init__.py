@@ -7,12 +7,15 @@ import time
 import gpxpy.geo
 import requests
 import base64
+import datetime
 from random import uniform
 
 # import Pokemon Go API lib
 from pgoapi import pgoapi
 from pgoapi import utilities
 from pgoapi.exceptions import NotLoggedInException
+from pgoapi.exceptions import AuthException
+from pgoapi.exceptions import ServerSideRequestThrottlingException
 
 from bot.base_dir import _base_dir
 from bot.item_list import Item
@@ -27,6 +30,7 @@ import bot.inventory
 logging.basicConfig(
 	level=logging.INFO,
 	format='%(asctime)s [%(name)s] [%(levelname)s] %(message)s')
+logFormatter = logging.Formatter('%(asctime)s [%(name)s] [%(levelname)s] %(message)s')
 logger = logging.getLogger('init')
 logger.setLevel(logging.INFO)
 
@@ -56,6 +60,7 @@ class Bot(object):
 		self.logger = logger
 		self.farming_mode = False
 		self.inventorys = None
+		self.ban = False
 
 	def start(self):
 		self.login()
@@ -71,7 +76,7 @@ class Bot(object):
 
 				self.check_limit()
 
-			except (NotLoggedInException, TypeError) as e:
+			except (AuthException, NotLoggedInException, ServerSideRequestThrottlingException, TypeError, KeyError) as e:
 				self.logger.error(e)
 				self.logger.info(
 					'Token Expired, wait for 20 seconds.'
@@ -90,7 +95,7 @@ class Bot(object):
 			self.lat,
 			self.lng
 		)
-		self.set_location(self.lat, self.lng)
+		self.set_location(self.lat, self.lng, False)
 		self.api.set_authentication(
 			provider = self.config['auth_service'], 
 			username = self.config['username'],
@@ -141,12 +146,13 @@ class Bot(object):
 		pokemons = self.get_pokemons()
 
 		snipe_count = 0
+		vanished = 0
 		for pokemon_encounter in pokemons:
 			if pokemon_encounter['encounter_id'] and not bot.models.Catch.check_catch(self.config['username'], pokemon_encounter['encounter_id']):
 				if snipe_count >= self.config['catch_time_every_run']:
 					break
 
-				self.set_location(pokemon_encounter['latitude'], pokemon_encounter['longitude'])
+				self.set_location(pokemon_encounter['latitude'], pokemon_encounter['longitude'], True)
 				response = self.create_encounter_call(pokemon_encounter)
 
 				pokemon_data = response['wild_pokemon']['pokemon_data'] if 'wild_pokemon' in response else None
@@ -154,7 +160,7 @@ class Bot(object):
 					self.logger.warning(
 						'The pokemon maybe disappeared.'
 					)
-					self.set_location(self.lat, self.lng)
+					self.set_location(self.lat, self.lng, True)
 					snipe_count += 1
 					continue
 
@@ -169,20 +175,29 @@ class Bot(object):
 					pokemon.iv_display()
 				)
 
-				self.set_location(self.lat, self.lng)
+				self.set_location(self.lat, self.lng, True)
 
 				catch_rate = [0] + response['capture_probability']['capture_probability']
 				pokemon.id = self.do_catch(pokemon, catch_rate)
+
+				if pokemon.id == 0:
+					vanished += 1
+
 				bot.models.Catch.insert_catch(self.config['username'], pokemon_encounter['encounter_id'])
-				self.inventorys.pokemons.append(pokemon)
+
+				if pokemon.id != 0:
+					self.inventorys.pokemons.append(pokemon)
 				
 				snipe_count += 1
+
+				if vanished >= self.config['catch_time_every_run']:
+					self.ban = True
 				
 
 	def do_catch(self, pokemon, catch_rate_by_ball):
 		berry_id = bot.inventory.ITEM_RAZZ_BERRY
 		maximum_ball = bot.inventory.ITEM_ULTRA_BALL
-		ideal_catch_rate_before_throw = 0.35
+		ideal_catch_rate_before_throw = 0.25
 		berry_count = self.inventorys.items[berry_id]
 
 		used_berry = False
@@ -230,23 +245,55 @@ class Bot(object):
 
 			self.inventorys.items[current_ball] -= 1
 
-			self.logger.info(
-				'Used %s, with chance %s - %s left.',
-				self.item_list[str(current_ball)],
-				'{0:.2f}%'.format(catch_rate_by_ball[current_ball] * 100),
-				str(self.inventorys.items[current_ball])
-			)
+			try:
+				self.logger.info(
+					'Used %s, with chance %s - %s left.',
+					self.item_list[str(current_ball)],
+					'{0:.2f}%'.format(catch_rate_by_ball[current_ball] * 100),
+					str(self.inventorys.items[current_ball])
+				)
+			except IndexError:
+				self.ban = True
+
 
 			time.sleep(0.1)
-			response_dict = self.api.catch_pokemon(
-				encounter_id = pokemon.encounter_id[0],
-				pokeball = int(current_ball),
-				normalized_reticle_size=float(reticle_size_parameter),
-				spawn_point_id = str(pokemon.spawn_point_id),
-				hit_pokemon = 1,
-				spin_modifier = float(spin_modifier_parameter),
-				normalized_hit_position = 1.0
-			)
+
+			if not self.ban:
+				response_dict = self.api.catch_pokemon(
+					encounter_id = pokemon.encounter_id[0],
+					pokeball = int(current_ball),
+					normalized_reticle_size=float(reticle_size_parameter),
+					spawn_point_id = str(pokemon.spawn_point_id),
+					hit_pokemon = 1,
+					spin_modifier = float(spin_modifier_parameter),
+					normalized_hit_position = 1.0
+				)
+			else:
+				self.logger.error(
+					'Probably got softban, do unban..'
+				)
+				for i in range(0, 20):
+					time.sleep(1)
+					if self.inventorys.items[bot.inventory.ITEM_POKE_BALL] != 0:
+						current_ball = bot.inventory.ITEM_POKE_BALL
+					elif self.inventorys.items[bot.inventory.ITEM_GREAT_BALL] != 0:
+						current_ball = bot.inventory.ITEM_GREAT_BALL
+					elif self.inventorys.items[bot.inventory.ITEM_ULTRA_BALL] != 0:
+						current_ball = bot.inventory.ITEM_ULTRA_BALL
+
+					self.inventorys.items[current_ball] -= 1
+					response_dict = self.api.catch_pokemon(
+						encounter_id = pokemon.encounter_id[0],
+						pokeball = int(current_ball),
+						normalized_reticle_size=float(reticle_size_parameter),
+						spawn_point_id = str(pokemon.spawn_point_id),
+						hit_pokemon = 0,
+						spin_modifier = float(spin_modifier_parameter),
+						normalized_hit_position = 1.0
+					)
+				self.ban = False
+				break
+
 
 			try:
 				catch_pokemon_status = response_dict['responses']['CATCH_POKEMON']['status']
@@ -267,6 +314,8 @@ class Bot(object):
 					pokemon.name
 				)
 
+				return 0
+
 			elif catch_pokemon_status == CATCH_STATUS_SUCCESS:
 				self.logger.info(
 					'Captured %s! [CP %s] [IV %s] [%s] [+%d exp]',
@@ -278,7 +327,9 @@ class Bot(object):
 				)
 				self.inventorys.exp += sum(response_dict['responses']['CATCH_POKEMON']['capture_award']['xp'])
 
-			return response_dict['responses']['CATCH_POKEMON'].get('captured_pokemon_id', 0)
+				return response_dict['responses']['CATCH_POKEMON'].get('captured_pokemon_id', 0)
+
+			return None
 
 	def use_berry(self, berry_id, berry_count, encounter_id, spawn_point_id, catch_rate_by_ball, current_ball):
 		new_catch_rate_by_ball = []
@@ -332,25 +383,31 @@ class Bot(object):
 			'Do some magic to get pokemons..'
 		)
 
-		responses = requests.get(URL + 'raw_data?pokemon=true&pokestops=false&gyms=false&scanned=false&spawnpoints=false', verify=False).json()['pokemons']
+		try:
+			responses = requests.get(URL + 'raw_data?pokemon=true&pokestops=false&gyms=false&scanned=false&spawnpoints=false', verify=False).json()['pokemons']
 
-		rare_rate = {
-			u'常見': 0,
-			u'少見': 1,
-			u'罕見': 2,
-			u'非常罕見': 3,
-			u'超罕見': 4
-		}
+			rare_rate = {
+				u'常見': 0,
+				u'少見': 1,
+				u'罕見': 2,
+				u'非常罕見': 3,
+				u'超罕見': 4
+			}
 
-		for pokemon in responses:
-			pokemon['pokemon_rarity'] = rare_rate[pokemon['pokemon_rarity']]
+			for pokemon in responses:
+				pokemon['pokemon_rarity'] = rare_rate[pokemon['pokemon_rarity']]
 
-		responses = sorted(responses, key=lambda k: k['disappear_time']) 
+			responses = sorted(responses, key=lambda k: k['disappear_time']) 
 
-		if self.config['rare_first']:
-			responses = sorted(responses, key=lambda k: k['pokemon_rarity'], reverse=True) 
+			if self.config['rare_first']:
+				responses = sorted(responses, key=lambda k: k['pokemon_rarity'], reverse=True) 
 
-		return responses
+			return responses
+		except requests.exceptions.ConnectionError:
+			self.logger.error(
+				'Feed server is unstable, skip this :('
+			)
+			return None
 
 	def create_encounter_call(self, pokemon):		
 		time.sleep(0.1)
@@ -440,7 +497,8 @@ class Bot(object):
 			if steps == 0:
 				self.set_location(
 					self.lat,
-					self.lng
+					self.lng,
+					False
 				)
 			
 			time.sleep(1)
@@ -466,7 +524,8 @@ class Bot(object):
 			time.sleep(delay - steps)
 			self.set_location(
 				self.lat,
-				self.lng
+				self.lng,
+				False
 			)
 
 	def nearst_fort(self):
@@ -518,6 +577,10 @@ class Bot(object):
 		player = self.get_player_data()
 		self.logger = logging.getLogger(player['username'])
 		self.logger.setLevel(logging.INFO)
+
+		fileHandler = logging.FileHandler("{0}/{1}.log".format('log', player['username'] + '-' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+		fileHandler.setFormatter(logFormatter)
+		self.logger.addHandler(fileHandler)
 
 		self.inventorys = Inventory(self.api, self.config, self.logger)
 		
@@ -580,10 +643,11 @@ class Bot(object):
 		
 		return player_data
 
-	def set_location(self, lat, lng):
+	def set_location(self, lat, lng, snipe):
 		time.sleep(0.5)
 		self.api.set_position(lat, lng, 0.0)
-		bot.models.Location.set_location(self.config['username'], lat, lng)
+		if not snipe:
+			bot.models.Location.set_location(self.config['username'], lat, lng)
 
 	def get_location(self):
 		lat, lng = self.config['location'].split(',')

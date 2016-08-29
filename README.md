@@ -1,6 +1,7 @@
 # AlphaBot
 
 A bot for PokemonGo.
+
 This bot is totally not acted like human, used at your own risk.
 
 ## Features
@@ -8,7 +9,7 @@ This bot is totally not acted like human, used at your own risk.
 - [x] Search pokestops
 - [x] Farming
 - [x] Cache location & Daily limit
-- [ ] More valuable pokemon feed
+- [x] Valuable pokemon feed
 
 ## Installation
 ```
@@ -19,10 +20,11 @@ cp configs/config.json.example configs/config.json
 python run.py
 ```
 
-## Donations
-[![Donate](https://www.paypalobjects.com/en_US/i/btn/btn_donate_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=XBVPPU64E5ZKW)
+## Service or Donations 
+[![Donate](https://payment.allpay.com.tw/Content/images/pay_01B.jpg)](https://qr.allpay.com.tw/uJt9T)
 
-Your donations will be used to improve the server that magic work used.
+Lazy to build? You can pay to use our container.
+Donate? Your donations will be used to improve the server that magic work used.
 
 ## Can code?
 If you can code and you want to help, PR to the dev repo, master repo won't accept any PR.

@@ -4,6 +4,8 @@ import os
 import logging
 import json
 import time
+import sys
+import platform
 
 from bot.base_dir import _base_dir
 from bot import Bot
@@ -39,7 +41,43 @@ def init_config():
 		logging.error("Invalid Auth service specified! ('ptc' or 'google')")
 		return None
 
+	config.update({'encrypt_location': get_encrypt_lib()})
+
 	return config
+
+def get_encrypt_lib():
+	if sys.platform == "win32" or sys.platform == "cygwin":
+		if platform.architecture()[0] == '64bit':
+			lib_name = "encrypt64bit.dll"
+		else:
+			lib_name = "encrypt32bit.dll"
+
+	elif sys.platform == "darwin":
+		lib_name = "libencrypt-osx-64.so"
+
+	elif os.uname()[4].startswith("arm") and platform.architecture()[0] == '32bit':
+		lib_name = "libencrypt-linux-arm-32.so"
+
+	elif os.uname()[4].startswith("aarch64") and platform.architecture()[0] == '64bit':
+		lib_name = "libencrypt-linux-arm-64.so"
+
+	elif sys.platform.startswith('linux'):
+		if "centos" in platform.platform():
+			if platform.architecture()[0] == '64bit':
+				lib_name = "libencrypt-centos-x86-64.so"
+			else:
+				lib_name = "libencrypt-linux-x86-32.so"
+		else:
+			if platform.architecture()[0] == '64bit':
+				lib_name = "libencrypt-linux-x86-64.so"
+			else:
+				lib_name = "libencrypt-linux-x86-32.so"
+
+	elif sys.platform.startswith('freebsd'):
+		lib_name = "libencrypt-freebsd-64.so"
+
+	lib_path = os.path.join(_base_dir, "libencrypt", lib_name)
+	return lib_path
 
 def setup_logging(config):
 	logging.getLogger("requests").setLevel(logging.ERROR)
