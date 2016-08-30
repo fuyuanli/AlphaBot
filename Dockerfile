@@ -1,6 +1,6 @@
 FROM alpine:latest
 
-ARG VERSION=v1.1
+ARG VERSION=latest
 
 RUN apk -U --no-cache add \
     python py-setuptools
@@ -28,7 +28,8 @@ RUN pip install --no-cache-dir -r requirements.txt \
 
 ADD https://github.com/PokemonAlpha/AlphaBot/archive/$VERSION.tar.gz /tmp
 RUN apk -U --no-cache add --virtual .tar-deps tar \
-    && cat /tmp/$VERSION.tar.gz | tar -zxf - --strip-components=1 -C / \
+    && mkdir /AlphaBot \
+    && cat /tmp/$VERSION.tar.gz | tar -zxf - --strip-components=1 -C /AlphaBot \
     && apk del .tar-deps \
     && rm /tmp/$VERSION.tar.gz
 WORKDIR /AlphaBot
