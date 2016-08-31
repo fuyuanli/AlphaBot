@@ -161,7 +161,7 @@ class Bot(object):
 		best_iv_pokemons = sorted(self.inventorys.pokemons, key=lambda k: k.iv(), reverse=True) 
 		self.logger.info('====== Best IV ======')
 		for pokemon in best_iv_pokemons:
-			if pokemon.cp >= self.config['transfer_filter']['below_iv']:
+			if pokemon.iv >= self.config['transfer_filter']['below_iv']:
 				self.logger.info(
 					'%s [CP %s] [IV %s] [Move 1] %s [Move 2] %s',
 					pokemon.name,
