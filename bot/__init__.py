@@ -61,6 +61,7 @@ class Bot(object):
 		self.farming_mode = False
 		self.inventorys = None
 		self.ban = False
+		self.unban_try = 0
 
 	def start(self):
 		self.login()
@@ -297,9 +298,17 @@ class Bot(object):
 					normalized_hit_position = 1.0
 				)
 			else:
-				self.logger.error(
-					'Probably got softban, do unban..'
-				)
+				if self.unban_try > 1:
+					self.logger.error('unban failed, sleep for 5 hours.')
+					for i in range(0, 5):
+						self.logger.info('Sleeping...')
+						time.sleep(3600)
+
+					self.ban = False
+					self.unban_try = 0
+					break
+
+				self.logger.error('Probably got softban, do unban..')
 				for i in range(0, 20):
 					time.sleep(1)
 					if self.inventorys.items[bot.inventory.ITEM_POKE_BALL] != 0:
@@ -320,6 +329,7 @@ class Bot(object):
 						normalized_hit_position = 1.0
 					)
 				self.ban = False
+				self.unban_try += 1
 				break
 
 
@@ -354,6 +364,7 @@ class Bot(object):
 					sum(response_dict['responses']['CATCH_POKEMON']['capture_award']['xp'])
 				)
 				self.inventorys.exp += sum(response_dict['responses']['CATCH_POKEMON']['capture_award']['xp'])
+				self.unban_try = 0
 
 				return response_dict['responses']['CATCH_POKEMON'].get('captured_pokemon_id', 0)
 
@@ -606,7 +617,7 @@ class Bot(object):
 		self.logger = logging.getLogger(player['username'])
 		self.logger.setLevel(logging.INFO)
 
-		fileHandler = logging.FileHandler("{0}/{1}.log".format('log', player['username'] + '-' + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+		fileHandler = logging.FileHandler("{0}/{1}.log".format('log', 'bot'))
 		fileHandler.setFormatter(logFormatter)
 		self.logger.addHandler(fileHandler)
 
