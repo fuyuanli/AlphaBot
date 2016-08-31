@@ -549,15 +549,6 @@ class Bot(object):
 			)
 			steps += 1
 
-			if steps % 10 == 0:
-				self.logger.info(
-					"Walk to %s at %f, %f. (%d seconds)",
-					self.fort.name,
-					olatitude,
-					olongitude,
-					int(dist / self.config['step_diameter'])
-				)
-
 		steps -= 1
 		if steps % delay > 0:
 			time.sleep(delay - steps)
