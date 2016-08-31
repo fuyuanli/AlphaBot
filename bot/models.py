@@ -72,7 +72,7 @@ class Location(BaseModel):
 
 class Catch(BaseModel):
 	user = ForeignKeyField(User, related_name='catchs')
-	encounter_id = CharField(primary_key=True, max_length=50)
+	encounter_id = CharField(max_length=50)
 	created_date = DateTimeField(default=datetime.datetime.now)
 
 	@staticmethod
