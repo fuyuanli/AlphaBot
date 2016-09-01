@@ -1,8 +1,6 @@
 # AlphaBot
 
-A bot for PokemonGo.
-
-This bot is totally not acted like human, used at your own risk.
+A bot for PokemonGo, used at your own risk.
 
 ## Features
 - [x] Use magic to catch pokemons
@@ -21,7 +19,7 @@ python run.py
 ```
 
 ## Service or Donations 
-[![Donate](https://payment.allpay.com.tw/Content/images/pay_01B.jpg)](https://qr.allpay.com.tw/0pHPP)[![Donate](https://www.paypalobjects.com/en_US/i/btn/btn_subscribeCC_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=L35XCY62GXTD4)
+[https://pogo.tw](https://pogo.tw)
 
 Lazy to build? You can pay to use our container.
 
