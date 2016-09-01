@@ -148,7 +148,7 @@ class Bot(object):
 		best_cp_pokemons = sorted(self.inventorys.pokemons, key=lambda k: k.cp, reverse=True) 
 		self.logger.info('====== Best CP ======')
 		for pokemon in best_cp_pokemons:
-			if pokemon.cp >= self.config['transfer_filter']['below_cp']:
+			if pokemon.cp >= self.config['transfer_filter']['below_cp'] and not pokemon.is_egg:
 				self.logger.info(
 					'%s [CP %s] [IV %s] [Move 1] %s [Move 2] %s',
 					pokemon.name,
@@ -161,7 +161,7 @@ class Bot(object):
 		best_iv_pokemons = sorted(self.inventorys.pokemons, key=lambda k: k.iv(), reverse=True) 
 		self.logger.info('====== Best IV ======')
 		for pokemon in best_iv_pokemons:
-			if pokemon.cp >= self.config['transfer_filter']['below_iv']:
+			if pokemon.iv() >= self.config['transfer_filter']['below_iv'] and not pokemon.is_egg:
 				self.logger.info(
 					'%s [CP %s] [IV %s] [Move 1] %s [Move 2] %s',
 					pokemon.name,
@@ -549,15 +549,6 @@ class Bot(object):
 			)
 			steps += 1
 
-			if steps % 10 == 0:
-				self.logger.info(
-					"Walk to %s at %f, %f. (%d seconds)",
-					self.fort.name,
-					olatitude,
-					olongitude,
-					int(dist / self.config['step_diameter'])
-				)
-
 		steps -= 1
 		if steps % delay > 0:
 			time.sleep(delay - steps)
@@ -643,6 +634,10 @@ class Bot(object):
 		self.logger.info(
 			'Stardust: ' + str(stardust) +
 			' | Pokecoins: ' + str(pokecoins)
+		)
+
+		self.logger.info(
+			'Pokemons: ' + str(len(self.inventorys.pokemons)) + '/' + str(player['max_pokemon_storage'])
 		)
 
 		self.logger.info(
